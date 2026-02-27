@@ -5,9 +5,11 @@ export interface IUser extends Document {
   lastName: string;
   email: string;
   password?: string;
-  role: 'admin' | 'manager' | 'user';
+  role: 'admin' | 'manager' | 'staff';
   profileImage?: string;
   isArchived: boolean;
+  passwordResetToken?: string;
+  passwordResetExpiry?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -18,7 +20,7 @@ const UserSchema: Schema<IUser> = new Schema(
     lastName: { type: String, required: true, trim: true },
     email: { type: String, required: true, unique: true, lowercase: true, trim: true },
     password: { type: String, required: true, minlength: 8 },
-    role: { type: String, enum: ['admin', 'manager', 'user'], default: 'user' },
+    role: { type: String, enum: ['admin', 'manager', 'staff'], default: 'staff' },
     profileImage: { 
       type: String, 
       validate: {
@@ -32,6 +34,8 @@ const UserSchema: Schema<IUser> = new Schema(
       }
     },
     isArchived: { type: Boolean, default: false },
+    passwordResetToken: { type: String },
+    passwordResetExpiry: { type: Date },
   },
   { timestamps: true }
 );

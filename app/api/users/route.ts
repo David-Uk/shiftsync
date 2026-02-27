@@ -8,9 +8,18 @@ import { handleImageUpload, validateContentType } from '@/lib/uploadMiddleware';
 
 export async function POST(req: NextRequest) {
   try {
-    const adminCheck = await verifyAdmin(req);
-    if ('error' in adminCheck) {
-      return NextResponse.json({ message: adminCheck.error }, { status: adminCheck.status });
+    await connectToDatabase();
+
+    // Check if any admin users already exist
+    const existingAdmin = await User.findOne({ role: 'admin' });
+    
+    // If no admin exists, allow creation of first admin without authentication
+    // Otherwise, require admin authentication
+    if (existingAdmin) {
+      const adminCheck = await verifyAdmin(req);
+      if ('error' in adminCheck) {
+        return NextResponse.json({ message: adminCheck.error }, { status: adminCheck.status });
+      }
     }
 
     // Check if this is a multipart form request (with image)
@@ -43,7 +52,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ message: 'Missing required fields' }, { status: 400 });
     }
 
-    await connectToDatabase();
+    // If no admin exists, only allow creation of an admin user
+    if (!existingAdmin && sanitizedData.role !== 'admin') {
+      return NextResponse.json({ 
+        message: 'First user must be an admin. Please set role to "admin".' 
+      }, { status: 400 });
+    }
 
     const existingUser = await User.findOne({ email: sanitizedData.email });
     if (existingUser) {
@@ -64,8 +78,12 @@ export async function POST(req: NextRequest) {
 
     await newUser.save();
 
+    const successMessage = !existingAdmin 
+      ? 'First admin user created successfully. You can now log in and create additional users.'
+      : 'User created successfully';
+
     return NextResponse.json(
-      { message: 'User created successfully', user: { id: newUser._id, email: newUser.email, role: newUser.role, profileImage: newUser.profileImage } },
+      { message: successMessage, user: { id: newUser._id, email: newUser.email, role: newUser.role, profileImage: newUser.profileImage } },
       { status: 201 }
     );
   } catch (error: unknown) {
