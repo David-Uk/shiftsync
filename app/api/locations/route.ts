@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import mongoose from 'mongoose';
 import Location from '@/models/Location';
 import User from '@/models/User';
-import { verifyAuth } from '@/lib/auth';
+import { verifyAuth, verifyAdmin } from '@/lib/auth';
 import connectToDatabase from '@/lib/mongodb';
 
 // GET unassigned managers
@@ -20,6 +19,7 @@ export async function GET(request: NextRequest) {
     const city = searchParams.get('city');
     const unassigned = searchParams.get('unassigned');
     const allManagers = searchParams.get('allManagers');
+    const managerId = searchParams.get('managerId');
     
     const skip = (page - 1) * limit;
     
@@ -27,6 +27,11 @@ export async function GET(request: NextRequest) {
     const filter: Record<string, unknown> = {};
     if (city) {
       filter.city = new RegExp(city, 'i');
+    }
+    
+    // Add manager filter if provided
+    if (managerId) {
+      filter.manager = managerId;
     }
     
     let locations;
@@ -132,25 +137,22 @@ export async function GET(request: NextRequest) {
 // POST create new location (admin only)
 export async function POST(request: NextRequest) {
   try {
-    await mongoose.connect(process.env.MONGODB_URI!);
+    const adminCheck = await verifyAdmin(request);
+    if (adminCheck.error) {
+      return NextResponse.json({ success: false, error: adminCheck.error }, { status: adminCheck.status });
+    }
+    
+    await connectToDatabase();
     
     const body = await request.json();
-    const { address, city, timezone, manager, createdBy } = body;
+    const { address, city, timezone, manager } = body;
+    const createdBy = adminCheck.user?._id;
     
     // Validate required fields
     if (!address || !city || !timezone || !manager || !createdBy) {
       return NextResponse.json(
         { success: false, error: 'All fields are required' },
         { status: 400 }
-      );
-    }
-    
-    // Verify creator is admin
-    const creator = await User.findById(createdBy);
-    if (!creator || creator.role !== 'admin') {
-      return NextResponse.json(
-        { success: false, error: 'Only admins can create locations' },
-        { status: 403 }
       );
     }
     
@@ -191,7 +193,7 @@ export async function POST(request: NextRequest) {
     }
     
     return NextResponse.json(
-      { success: false, error: 'Failed to create location' },
+      { success: false, error: error instanceof Error ? error.message : 'Failed to create location' },
       { status: 500 }
     );
   }

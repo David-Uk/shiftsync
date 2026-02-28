@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
+import type { FilterQuery } from 'mongoose';
 import bcrypt from 'bcryptjs';
 import connectToDatabase from '@/lib/mongodb';
-import User from '@/models/User';
+import User, { IUser } from '@/models/User';
 import { verifyAuth, verifyAdmin } from '@/lib/auth';
 import { sanitizeUserCreation } from '@/lib/validation';
 import { handleImageUpload, validateContentType } from '@/lib/uploadMiddleware';
@@ -122,7 +123,7 @@ export async function GET(req: NextRequest) {
     const roleFilter = searchParams.get('role') || '';
 
     // Build query
-    const query: Record<string, any> = {};
+    const query: FilterQuery<IUser> = {};
     if (search) {
       query.$or = [
         { firstName: { $regex: search, $options: 'i' } },

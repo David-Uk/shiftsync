@@ -18,6 +18,7 @@ interface Location {
     email: string;
   };
   createdAt: string;
+  updatedAt?: string;
 }
 
 interface Manager {
@@ -28,6 +29,18 @@ interface Manager {
   role: string;
   isAvailable: boolean;
   assignedLocationCount: number;
+}
+
+interface ApiUser {
+  _id: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  role: string;
+}
+
+interface ApiLocation {
+  manager: string | { _id: string };
 }
 
 export default function LocationsPage() {
@@ -59,6 +72,11 @@ export default function LocationsPage() {
           search: searchTerm
         });
 
+        // Add manager filter if user is a manager
+        if (user?.role === 'manager') {
+          params.append('managerId', user._id || user.id);
+        }
+
         const response = await fetch(`/api/locations?${params}`, {
           headers: {
             'Authorization': `Bearer ${token}`,
@@ -82,12 +100,12 @@ export default function LocationsPage() {
     const fetchManagers = async () => {
       try {
         const token = localStorage.getItem('token');
-        
+
         // 1. Fetch all users with manager role
         const usersResponse = await fetch('/api/users?role=manager&limit=100', {
           headers: { 'Authorization': `Bearer ${token}` }
         });
-        
+
         // 2. Fetch all locations to see which managers are already assigned
         const locationsResponse = await fetch('/api/locations?limit=100', {
           headers: { 'Authorization': `Bearer ${token}` }
@@ -96,16 +114,16 @@ export default function LocationsPage() {
         if (usersResponse.ok && locationsResponse.ok) {
           const userData = await usersResponse.json();
           const locationData = await locationsResponse.json();
-          
+
           const allUsers = userData.users || [];
           const allLocations = locationData.data || [];
-          
+
           // Get IDs of managers already assigned to a location
-          const assignedManagerIds = new Set(allLocations.map((loc: any) => 
-            typeof loc.manager === 'object' ? loc.manager._id : loc.manager
+          const assignedManagerIds = new Set(allLocations.map((loc: ApiLocation) =>
+            typeof loc.manager === 'object' && loc.manager !== null ? loc.manager._id : loc.manager
           ));
 
-          const mappedManagers = allUsers.map((u: any) => ({
+          const mappedManagers = allUsers.map((u: ApiUser) => ({
             _id: u._id,
             firstName: u.firstName,
             lastName: u.lastName,
@@ -134,6 +152,22 @@ export default function LocationsPage() {
     location.address.toLowerCase().includes(searchTerm.toLowerCase()) ||
     location.city.toLowerCase().includes(searchTerm.toLowerCase())
   );
+
+  const calculateTimeSpan = (createdAt: string, updatedAt?: string) => {
+    const created = new Date(createdAt);
+    const now = new Date();
+    const updated = updatedAt ? new Date(updatedAt) : now;
+
+    const totalDays = Math.floor((now.getTime() - created.getTime()) / (1000 * 60 * 60 * 24));
+    const daysSinceUpdate = Math.floor((now.getTime() - updated.getTime()) / (1000 * 60 * 60 * 24));
+
+    if (totalDays === 0) return 'Created today';
+    if (totalDays === 1) return 'Created yesterday';
+    if (totalDays < 7) return `Created ${totalDays} days ago`;
+    if (totalDays < 30) return `Created ${Math.floor(totalDays / 7)} week${Math.floor(totalDays / 7) > 1 ? 's' : ''} ago`;
+    if (totalDays < 365) return `Created ${Math.floor(totalDays / 30)} month${Math.floor(totalDays / 30) > 1 ? 's' : ''} ago`;
+    return `Created ${Math.floor(totalDays / 365)} year${Math.floor(totalDays / 365) > 1 ? 's' : ''} ago`;
+  };
 
   const handleDeleteLocation = async (locationId: string) => {
     if (!confirm('Are you sure you want to delete this location?')) {
@@ -244,8 +278,15 @@ export default function LocationsPage() {
         <div className="bg-white rounded-lg shadow p-6">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <h1 className="text-2xl font-bold text-gray-900">Locations</h1>
-              <p className="text-gray-600 mt-1">Manage work locations</p>
+              <h1 className="text-2xl font-bold text-gray-900">
+                {user?.role === 'manager' ? 'My Locations' : 'Locations'}
+              </h1>
+              <p className="text-gray-600 mt-1">
+                {user?.role === 'manager'
+                  ? 'Locations assigned to you for management'
+                  : 'Manage work locations'
+                }
+              </p>
             </div>
 
             {user?.role === 'admin' && (
@@ -357,9 +398,9 @@ export default function LocationsPage() {
                     >
                       <option value="">Select manager</option>
                       {managers.map((manager) => (
-                        <option 
-                          key={manager._id} 
-                          value={manager._id} 
+                        <option
+                          key={manager._id}
+                          value={manager._id}
                           disabled={!manager.isAvailable}
                           className={manager.isAvailable ? "text-green-600" : "text-gray-400"}
                         >
@@ -440,47 +481,75 @@ export default function LocationsPage() {
                   key={location._id}
                   className="bg-white p-6 border border-gray-200 rounded-lg hover:shadow-md transition-shadow"
                 >
-                  <div className="flex items-start justify-between">
+                  <div className="flex flex-col h-full">
                     <div className="flex-1">
-                      <div>
-                        <h3 className="text-lg font-medium text-gray-900">{location.address}</h3>
+                      <div className="mb-4">
+                        <h3 className="text-lg font-semibold text-gray-900 mb-1">{location.address}</h3>
                         <p className="text-sm text-gray-600">{location.city}</p>
                         <p className="text-xs text-gray-500">Timezone: {location.timezone}</p>
+                        <p className="text-xs text-indigo-600 font-medium mt-1">{calculateTimeSpan(location.createdAt, location.updatedAt)}</p>
                       </div>
 
-                      <div className="mt-4 space-y-2">
-                        <div className="flex items-center text-sm text-gray-500">
-                          <MapPin className="h-4 w-4 mr-1" />
-                          <span>{location.address}</span>
+                      <div className="space-y-3">
+                        <div className="flex items-start">
+                          <MapPin className="h-4 w-4 mr-2 text-gray-400 mt-0.5 flex-shrink-0" />
+                          <div>
+                            <p className="text-xs font-medium text-gray-500 mb-0.5">Address</p>
+                            <p className="text-sm text-gray-700">{location.address}</p>
+                          </div>
                         </div>
-                        <div className="flex items-center text-sm text-gray-500">
-                          <Phone className="h-4 w-4 mr-1" />
-                          <span>Contact: {location.manager.email}</span>
+
+                        <div className="flex items-start">
+                          <Phone className="h-4 w-4 mr-2 text-gray-400 mt-0.5 flex-shrink-0" />
+                          <div>
+                            <p className="text-xs font-medium text-gray-500 mb-0.5">Manager Contact</p>
+                            <p className="text-sm text-gray-700">{location.manager.email}</p>
+                          </div>
                         </div>
-                        <div className="flex items-center text-sm text-gray-500">
-                          <Mail className="h-4 w-4 mr-1" />
-                          <span>{location.manager.email}</span>
+
+                        <div className="flex items-start">
+                          <Mail className="h-4 w-4 mr-2 text-gray-400 mt-0.5 flex-shrink-0" />
+                          <div>
+                            <p className="text-xs font-medium text-gray-500 mb-0.5">Email</p>
+                            <p className="text-sm text-gray-700">{location.manager.email}</p>
+                          </div>
+                        </div>
+
+                        <div className="flex items-start">
+                          <div className="h-4 w-4 mr-2 flex-shrink-0 mt-0.5">
+                            <div className="w-full h-full rounded-full bg-indigo-100 flex items-center justify-center">
+                              <span className="text-xs font-medium text-indigo-600">MGR</span>
+                            </div>
+                          </div>
+                          <div>
+                            <p className="text-xs font-medium text-gray-500 mb-0.5">Assigned Manager</p>
+                            <p className="text-sm text-gray-700 font-medium">
+                              {location.manager.firstName} {location.manager.lastName}
+                            </p>
+                          </div>
                         </div>
                       </div>
                     </div>
 
-                    <div className="flex space-x-2">
-                      <button
-                        onClick={() => router.push(`/locations/${location._id}/edit`)}
-                        className="bg-indigo-600 text-white px-3 py-1 rounded-md hover:bg-indigo-700 text-sm"
-                      >
-                        <Edit className="h-4 w-4" />
-                      </button>
+                    {user?.role === 'admin' && (
+                      <div className="flex gap-2 mt-6 pt-4 border-t border-gray-100">
+                        <button
+                          onClick={() => router.push(`/locations/${location._id}/edit`)}
+                          className="flex-1 bg-indigo-600 text-white px-3 py-2 rounded-lg hover:bg-indigo-700 text-sm flex items-center justify-center transition-all duration-200 shadow-sm hover:shadow active:scale-[0.98]"
+                        >
+                          <Edit className="h-4 w-4 mr-2" />
+                          Edit
+                        </button>
 
-                      {user?.role === 'admin' && (
                         <button
                           onClick={() => handleDeleteLocation(location._id)}
-                          className="bg-red-600 text-white px-3 py-1 rounded-md hover:bg-red-700 text-sm"
+                          className="flex-1 bg-red-50 text-red-600 px-3 py-2 rounded-lg hover:bg-red-100 text-sm flex items-center justify-center transition-all duration-200 border border-red-100 active:scale-[0.98]"
                         >
-                          <Trash2 className="h-4 w-4" />
+                          <Trash2 className="h-4 w-4 mr-2" />
+                          Delete
                         </button>
-                      )}
-                    </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               ))}
