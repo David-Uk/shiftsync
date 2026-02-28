@@ -3,6 +3,8 @@ import connectToDatabase from '@/lib/mongodb';
 import Staff from '@/models/Staff';
 import { verifyAdmin } from '@/lib/auth';
 import { validateObjectId, sanitizeStaffUpdate } from '@/lib/validation';
+import NotificationService from '@/lib/notificationService';
+import mongoose from 'mongoose';
 
 // GET staff member by ID (Admin only)
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -63,6 +65,32 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       { new: true, runValidators: true }
     ).populate('user', 'firstName lastName email role profileImage');
 
+    if (updatedStaff) {
+      try {
+        const adminId = adminCheck.user?._id as mongoose.Types.ObjectId;
+        const staffUserId = (updatedStaff.user as any)._id as mongoose.Types.ObjectId;
+
+        // 1. Notify User
+        await NotificationService.createNotification({
+          type: 'user_updated',
+          title: 'Employment Details Updated',
+          message: `Your staff record has been updated by an administrator. New designation: ${updatedStaff.designation}.`,
+          recipient: staffUserId,
+          sender: adminId
+        });
+
+        // 2. Notify Admin
+        await NotificationService.createAdminNotification({
+          type: 'user_updated',
+          title: 'Staff Record Updated',
+          message: `Admin ${adminCheck.user?.firstName} updated staff record for ${(updatedStaff.user as any).firstName}.`,
+          sender: adminId
+        });
+      } catch (err) {
+        console.error('Failed to send staff update notifications:', err);
+      }
+    }
+
     return NextResponse.json({
       message: 'Staff member updated successfully',
       staff: updatedStaff
@@ -92,6 +120,20 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     }
 
     await Staff.findByIdAndDelete(id);
+
+    try {
+      const adminId = adminCheck.user?._id as mongoose.Types.ObjectId;
+      const staffUserId = staff.user as mongoose.Types.ObjectId;
+
+      await NotificationService.createAdminNotification({
+        type: 'user_archived',
+        title: 'Staff Removed',
+        message: `Staff member record for user ID ${staffUserId} was removed by admin.`,
+        sender: adminId
+      });
+    } catch (err) {
+      console.error('Failed to send staff removal notifications:', err);
+    }
 
     return NextResponse.json({
       message: 'Staff member removed successfully'

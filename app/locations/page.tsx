@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import DashboardLayout from '@/components/DashboardLayout';
-import { MapPin, Phone, Mail, Plus, Edit, Trash2 } from 'lucide-react';
+import { MapPin, Phone, Mail, Plus, Edit, Trash2, RefreshCw } from 'lucide-react';
 
 interface Location {
   _id: string;
@@ -48,13 +48,14 @@ export default function LocationsPage() {
   const router = useRouter();
   const [locations, setLocations] = useState<Location[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [managers, setManagers] = useState<Manager[]>([]);
   const [formData, setFormData] = useState({
     address: '',
     city: '',
-    timezone: '',
+    timezone: 'GMT+0',
     manager: ''
   });
   const [formLoading, setFormLoading] = useState(false);
@@ -64,6 +65,12 @@ export default function LocationsPage() {
       router.push('/auth/login');
       return;
     }
+
+    const handleRefresh = async () => {
+      setRefreshing(true);
+      await fetchLocations();
+      setRefreshing(false);
+    };
 
     const fetchLocations = async () => {
       try {
@@ -88,7 +95,8 @@ export default function LocationsPage() {
           const data = await response.json();
           setLocations(data.data || []);
         } else {
-          throw new Error('Failed to fetch locations');
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(errorData.message || 'Failed to fetch locations');
         }
       } catch (error) {
         console.error('Error fetching locations:', error);
@@ -118,10 +126,12 @@ export default function LocationsPage() {
           const allUsers = userData.users || [];
           const allLocations = locationData.data || [];
 
-          // Get IDs of managers already assigned to a location
-          const assignedManagerIds = new Set(allLocations.map((loc: ApiLocation) =>
-            typeof loc.manager === 'object' && loc.manager !== null ? loc.manager._id : loc.manager
-          ));
+          // Count locations per manager
+          const locationCounts: Record<string, number> = {};
+          allLocations.forEach((loc: ApiLocation) => {
+            const mId = typeof loc.manager === 'object' && loc.manager !== null ? loc.manager._id : loc.manager;
+            if (mId) locationCounts[mId] = (locationCounts[mId] || 0) + 1;
+          });
 
           const mappedManagers = allUsers.map((u: ApiUser) => ({
             _id: u._id,
@@ -129,8 +139,8 @@ export default function LocationsPage() {
             lastName: u.lastName,
             email: u.email,
             role: u.role,
-            isAvailable: !assignedManagerIds.has(u._id),
-            assignedLocationCount: assignedManagerIds.has(u._id) ? 1 : 0
+            isAvailable: true, // Always available for multiple assignments now
+            assignedLocationCount: locationCounts[u._id] || 0
           }));
 
           setManagers(mappedManagers);
@@ -146,20 +156,18 @@ export default function LocationsPage() {
     if (user?.role === 'admin') {
       fetchManagers();
     }
-  }, [isAuthenticated, searchTerm, user?.role, router]);
+  }, [isAuthenticated, searchTerm, user?.role, user?._id, user?.id, router]);
 
   const filteredLocations = locations.filter(location =>
     location.address.toLowerCase().includes(searchTerm.toLowerCase()) ||
     location.city.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  const calculateTimeSpan = (createdAt: string, updatedAt?: string) => {
+  const calculateTimeSpan = (createdAt: string) => {
     const created = new Date(createdAt);
     const now = new Date();
-    const updated = updatedAt ? new Date(updatedAt) : now;
 
     const totalDays = Math.floor((now.getTime() - created.getTime()) / (1000 * 60 * 60 * 24));
-    const daysSinceUpdate = Math.floor((now.getTime() - updated.getTime()) / (1000 * 60 * 60 * 24));
 
     if (totalDays === 0) return 'Created today';
     if (totalDays === 1) return 'Created yesterday';
@@ -401,10 +409,9 @@ export default function LocationsPage() {
                         <option
                           key={manager._id}
                           value={manager._id}
-                          disabled={!manager.isAvailable}
-                          className={manager.isAvailable ? "text-green-600" : "text-gray-400"}
+                          className="text-gray-700"
                         >
-                          {manager.isAvailable ? '✅' : '🚫'} {manager.firstName} {manager.lastName} ({manager.email}) {manager.isAvailable ? '- Available' : '- Already Assigned'}
+                          👤 {manager.firstName} {manager.lastName} ({manager.email}) — {manager.assignedLocationCount === 0 ? 'No active locations' : `${manager.assignedLocationCount} location${manager.assignedLocationCount > 1 ? 's' : ''} assigned`}
                         </option>
                       ))}
                     </select>
@@ -444,15 +451,25 @@ export default function LocationsPage() {
 
         {/* Search */}
         <div className="bg-white rounded-lg shadow p-6">
-          <div className="relative">
-            <input
-              type="text"
-              placeholder="Search locations..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-            />
-            <MapPin className="absolute left-3 top-1/2 h-4 w-4 text-gray-400" />
+          <div className="flex gap-3">
+            <div className="flex-1 relative">
+              <input
+                type="text"
+                placeholder="Search locations..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+              />
+              <MapPin className="absolute left-3 top-1/2 h-4 w-4 text-gray-400" />
+            </div>
+            <button
+              onClick={handleRefresh}
+              disabled={refreshing}
+              className="bg-white text-gray-700 border border-gray-200 shadow-sm px-4 py-2 rounded-xl hover:bg-gray-50 hover:shadow hover:-translate-y-0.5 transition-all duration-200 flex items-center font-medium disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
+            >
+              <RefreshCw className={`h-4 w-4 mr-2 text-gray-500 ${refreshing ? 'animate-spin' : 'group-hover:rotate-180 transition-transform duration-500'}`} />
+              {refreshing ? 'Refreshing...' : 'Refresh'}
+            </button>
           </div>
         </div>
 

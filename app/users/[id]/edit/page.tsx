@@ -55,7 +55,8 @@ export default function EditUserPage() {
           const data = await response.json();
           setUserData(data.user);
         } else {
-          throw new Error('Failed to fetch user data');
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(errorData.message || 'Failed to fetch user data');
         }
       } catch (err) {
         console.error('Error fetching user:', err);

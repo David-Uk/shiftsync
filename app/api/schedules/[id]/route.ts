@@ -4,6 +4,8 @@ import Schedule from '@/models/Schedule';
 import Staff from '@/models/Staff';
 import jwt from 'jsonwebtoken';
 import User from '@/models/User';
+import { createNotificationForEvent } from '@/lib/notificationMiddleware';
+import NotificationService from '@/lib/notificationService';
 
 // Helper function to verify JWT token and get user
 async function getAuthenticatedUser(request: NextRequest) {
@@ -19,7 +21,7 @@ async function getAuthenticatedUser(request: NextRequest) {
     await mongoose.connect(process.env.MONGODB_URI!);
     const user = await User.findById(decoded.userId);
     
-    if (!user || (user.role !== 'admin' && user.role !== 'manager' && user.role !== 'user')) {
+    if (!user || (user.role !== 'admin' && user.role !== 'manager' && user.role !== 'staff')) {
       return null;
     }
 
@@ -41,9 +43,10 @@ async function getUserStaffRecord(userId: string) {
 // GET schedule by ID for authenticated staff
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params;
     const user = await getAuthenticatedUser(request);
     if (!user) {
       return NextResponse.json(
@@ -54,7 +57,7 @@ export async function GET(
 
     await mongoose.connect(process.env.MONGODB_URI!);
     
-    if (!mongoose.Types.ObjectId.isValid(params.id)) {
+    if (!mongoose.Types.ObjectId.isValid(id)) {
       return NextResponse.json(
         { success: false, error: 'Invalid schedule ID' },
         { status: 400 }
@@ -65,7 +68,7 @@ export async function GET(
     const staff = await getUserStaffRecord(user._id.toString());
     
     const schedule = await Schedule.findOne({ 
-      _id: params.id, 
+      _id: id, 
       staff: staff._id 
     })
       .populate('location', 'address city timezone');
@@ -106,9 +109,10 @@ export async function GET(
 // PUT update schedule for authenticated staff
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params;
     const user = await getAuthenticatedUser(request);
     if (!user) {
       return NextResponse.json(
@@ -119,7 +123,7 @@ export async function PUT(
 
     await mongoose.connect(process.env.MONGODB_URI!);
     
-    if (!mongoose.Types.ObjectId.isValid(params.id)) {
+    if (!mongoose.Types.ObjectId.isValid(id)) {
       return NextResponse.json(
         { success: false, error: 'Invalid schedule ID' },
         { status: 400 }
@@ -130,7 +134,7 @@ export async function PUT(
     const staff = await getUserStaffRecord(user._id.toString());
     
     const schedule = await Schedule.findOne({ 
-      _id: params.id, 
+      _id: id, 
       staff: staff._id 
     });
     
@@ -169,7 +173,24 @@ export async function PUT(
     await schedule.save();
     
     // Populate the response
-    await schedule.populate('location', 'address city timezone');
+    await schedule.populate('location', 'address city timezone manager');
+    
+    // Create notification for the staff member and location manager
+    if (schedule.location) {
+      const loc = schedule.location as any;
+      if (loc.manager) {
+        await createNotificationForEvent(
+          request,
+          'schedule_updated',
+          {
+            scheduleId: schedule._id.toString(),
+            locationId: loc._id.toString(),
+            message: `Staff member ${user.firstName} updated their schedule at ${loc.address}.`
+          },
+          [loc.manager.toString()]
+        );
+      }
+    }
     
     return NextResponse.json({
       success: true,
@@ -205,9 +226,10 @@ export async function PUT(
 // DELETE schedule for authenticated staff
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params;
     const user = await getAuthenticatedUser(request);
     if (!user) {
       return NextResponse.json(
@@ -218,7 +240,7 @@ export async function DELETE(
 
     await mongoose.connect(process.env.MONGODB_URI!);
     
-    if (!mongoose.Types.ObjectId.isValid(params.id)) {
+    if (!mongoose.Types.ObjectId.isValid(id)) {
       return NextResponse.json(
         { success: false, error: 'Invalid schedule ID' },
         { status: 400 }
@@ -229,7 +251,7 @@ export async function DELETE(
     const staff = await getUserStaffRecord(user._id.toString());
     
     const schedule = await Schedule.findOne({ 
-      _id: params.id, 
+      _id: id, 
       staff: staff._id 
     });
     
@@ -240,7 +262,7 @@ export async function DELETE(
       );
     }
     
-    await Schedule.findByIdAndDelete(params.id);
+    await Schedule.findByIdAndDelete(id);
     
     return NextResponse.json({
       success: true,

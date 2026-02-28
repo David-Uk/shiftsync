@@ -5,6 +5,7 @@ import Staff from '@/models/Staff';
 import jwt from 'jsonwebtoken';
 import User from '@/models/User';
 import { createNotificationForEvent } from '@/lib/notificationMiddleware';
+import NotificationService from '@/lib/notificationService';
 
 // Helper function to verify JWT token and get user
 async function getAuthenticatedUser(request: NextRequest) {
@@ -39,7 +40,7 @@ async function getUserStaffRecord(userId: string) {
   return staff;
 }
 
-// GET all schedules for authenticated staff
+// GET all schedules for authenticated user
 export async function GET(request: NextRequest) {
   try {
     const user = await getAuthenticatedUser(request);
@@ -58,14 +59,24 @@ export async function GET(request: NextRequest) {
     const startDate = searchParams.get('startDate');
     const endDate = searchParams.get('endDate');
     const timezone = searchParams.get('timezone');
+    const staffId = searchParams.get('staffId');
     
     const skip = (page - 1) * limit;
     
-    // Get staff record for this user
-    const staff = await getUserStaffRecord(user._id.toString());
+    // Build filter based on user role
+    const filter: Record<string, unknown> = {};
     
-    // Build filter
-    const filter: Record<string, unknown> = { staff: staff._id };
+    if (user.role === 'staff') {
+      // Staff can only see their own schedules
+      const staff = await getUserStaffRecord(user._id.toString());
+      filter.staff = staff._id;
+    } else if (user.role === 'manager' || user.role === 'admin') {
+      // Managers and admins can see all schedules, or specific staff if staffId is provided
+      if (staffId) {
+        filter.staff = new mongoose.Types.ObjectId(staffId);
+      }
+      // No filter means all schedules
+    }
     
     if (startDate || endDate) {
       filter.startTime = {};
@@ -79,6 +90,7 @@ export async function GET(request: NextRequest) {
     
     const schedules = await Schedule.find(filter)
       .populate('location', 'address city timezone')
+      .populate('staff', 'firstName lastName email')
       .sort({ startTime: -1 })
       .skip(skip)
       .limit(limit);
@@ -92,7 +104,7 @@ export async function GET(request: NextRequest) {
     
     return NextResponse.json({
       success: true,
-      data: processedSchedules,
+      schedules: processedSchedules,
       pagination: {
         page,
         limit,

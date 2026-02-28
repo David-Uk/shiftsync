@@ -1,9 +1,8 @@
 import { NextRequest } from 'next/server';
 import NotificationService from '@/lib/notificationService';
 import { verifyAuth } from '@/lib/auth';
-import User from '@/models/User';
 import connectToDatabase from '@/lib/mongodb';
-import { Types } from 'mongoose';
+import mongoose, { Types } from 'mongoose';
 
 // Simplified middleware to automatically create notifications for various events
 export async function createNotificationForEvent(
@@ -24,6 +23,8 @@ export async function createNotificationForEvent(
     leaveId?: string;
     title?: string;
     message?: string;
+    weekStart?: string | Date;
+    weekEnd?: string | Date;
     priority?: 'low' | 'medium' | 'high' | 'urgent';
   },
   affectedUsers?: string[]
@@ -102,6 +103,11 @@ export async function createNotificationForEvent(
         }
         break;
 
+      case 'clock_in':
+      case 'clock_out':
+        // Universal admin notification will capture these
+        break;
+
       case 'emergency':
         if (eventData.title && eventData.message) {
           await NotificationService.createEmergencyNotification(
@@ -115,6 +121,24 @@ export async function createNotificationForEvent(
 
       default:
         console.log(`Event type ${eventType} handled`);
+    }
+
+    // ALWAYS notify admins for every action in the system
+    try {
+      const senderName = auth.user ? `${auth.user.firstName} ${auth.user.lastName}` : 'System';
+      const eventTitle = eventType.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+      
+      await NotificationService.createAdminNotification({
+        type: eventType as any,
+        title: `[Admin Alert] ${eventTitle}`,
+        message: `${senderName} triggered ${eventType}: ${eventData.message || eventData.title || ''}`,
+        sender: sender as mongoose.Types.ObjectId,
+        priority: eventData.priority || 'medium',
+        location: eventData.locationId ? new mongoose.Types.ObjectId(eventData.locationId) : undefined,
+        metadata: { ...eventData, senderName }
+      });
+    } catch (adminNotifyError) {
+      console.error('Failed to send universal admin notification:', adminNotifyError);
     }
   } catch (error) {
     console.error('Error creating notification for event:', eventType, error);

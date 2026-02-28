@@ -5,6 +5,7 @@ import Location from '@/models/Location';
 import Staff from '@/models/Staff';
 import User from '@/models/User';
 import jwt from 'jsonwebtoken';
+import NotificationService from '@/lib/notificationService';
 
 // Helper function to verify JWT token and get user
 async function getAuthenticatedUser(request: NextRequest) {
@@ -20,7 +21,7 @@ async function getAuthenticatedUser(request: NextRequest) {
     await mongoose.connect(process.env.MONGODB_URI!);
     const user = await User.findById(decoded.userId);
     
-    if (!user || (user.role !== 'admin' && user.role !== 'manager' && user.role !== 'user')) {
+    if (!user || (user.role !== 'admin' && user.role !== 'manager' && user.role !== 'staff')) {
       return null;
     }
 
@@ -33,9 +34,10 @@ async function getAuthenticatedUser(request: NextRequest) {
 // GET shift schedule by ID
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params;
     const user = await getAuthenticatedUser(request);
     if (!user) {
       return NextResponse.json(
@@ -46,14 +48,14 @@ export async function GET(
 
     await mongoose.connect(process.env.MONGODB_URI!);
     
-    if (!mongoose.Types.ObjectId.isValid(params.id)) {
+    if (!mongoose.Types.ObjectId.isValid(id)) {
       return NextResponse.json(
         { success: false, error: 'Invalid shift schedule ID' },
         { status: 400 }
       );
     }
     
-    const shiftSchedule = await ShiftSchedule.findById(params.id)
+    const shiftSchedule = await ShiftSchedule.findById(id)
       .populate('location', 'address city timezone')
       .populate('manager', 'firstName lastName email')
       .populate('assignedStaff', 'designation user');
@@ -74,9 +76,9 @@ export async function GET(
     }
     
     // If user is staff, check if they're assigned to this shift
-    if (user.role === 'user') {
+    if (user.role === 'staff') {
       const staff = await Staff.findOne({ user: user._id });
-      if (!staff || !shiftSchedule.assignedStaff.some(s => s._id.toString() === staff._id.toString())) {
+      if (!staff || !shiftSchedule.assignedStaff.some((s: any) => s._id.toString() === staff._id.toString())) {
         return NextResponse.json(
           { success: false, error: 'Access denied' },
           { status: 403 }
@@ -105,11 +107,12 @@ export async function GET(
 // PUT update shift schedule (managers only)
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params;
     const user = await getAuthenticatedUser(request);
-    if (!user || user.role === 'user') {
+    if (!user || user.role === 'staff') {
       return NextResponse.json(
         { success: false, error: 'Unauthorized' },
         { status: 401 }
@@ -118,14 +121,14 @@ export async function PUT(
 
     await mongoose.connect(process.env.MONGODB_URI!);
     
-    if (!mongoose.Types.ObjectId.isValid(params.id)) {
+    if (!mongoose.Types.ObjectId.isValid(id)) {
       return NextResponse.json(
         { success: false, error: 'Invalid shift schedule ID' },
         { status: 400 }
       );
     }
     
-    const shiftSchedule = await ShiftSchedule.findById(params.id);
+    const shiftSchedule = await ShiftSchedule.findById(id);
     if (!shiftSchedule) {
       return NextResponse.json(
         { success: false, error: 'Shift schedule not found' },
@@ -188,6 +191,49 @@ export async function PUT(
     await shiftSchedule.populate('manager', 'firstName lastName email');
     await shiftSchedule.populate('assignedStaff', 'designation user');
     
+    // Send Notifications
+    try {
+      const adminId = user._id as mongoose.Types.ObjectId;
+      const shiftId = shiftSchedule._id as mongoose.Types.ObjectId;
+      const locationDoc = shiftSchedule.location as any;
+      const locationId = locationDoc._id as mongoose.Types.ObjectId;
+      const locationAddress = locationDoc.address || 'assigned location';
+
+      // 1. Notify Admins
+      await NotificationService.createAdminNotification({
+        type: 'shift_updated',
+        title: 'Shift Schedule Updated',
+        message: `Manager ${user.firstName} updated the shift: "${title || shiftSchedule.title}" at ${locationAddress}.`,
+        location: locationId,
+        relatedEntity: { type: 'shift', id: shiftId },
+        sender: adminId
+      });
+
+      // 2. Notify Assigned Staff
+      if (shiftSchedule.assignedStaff && shiftSchedule.assignedStaff.length > 0) {
+        // Find staff users
+        const staffDocs = await Staff.find({ _id: { $in: shiftSchedule.assignedStaff } }).populate('user');
+        const userIds = staffDocs.map(s => {
+          const staffUser = s.user as any;
+          return staffUser?._id as mongoose.Types.ObjectId;
+        }).filter(Boolean);
+
+        if (userIds.length > 0) {
+          await NotificationService.createBulkNotifications({
+            type: 'shift_updated',
+            title: 'Your Shift Details Have Been Updated',
+            message: `The details for your shift "${title || shiftSchedule.title}" at ${locationAddress} have been changed.`,
+            location: locationId,
+            relatedEntity: { type: 'shift', id: shiftId },
+            sender: adminId,
+            priority: 'high'
+          }, userIds);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to send shift update notifications:', err);
+    }
+
     return NextResponse.json({
       success: true,
       data: shiftSchedule
@@ -215,11 +261,12 @@ export async function PUT(
 // DELETE shift schedule (managers only)
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params;
     const user = await getAuthenticatedUser(request);
-    if (!user || user.role === 'user') {
+    if (!user || user.role === 'staff') {
       return NextResponse.json(
         { success: false, error: 'Unauthorized' },
         { status: 401 }
@@ -228,14 +275,14 @@ export async function DELETE(
 
     await mongoose.connect(process.env.MONGODB_URI!);
     
-    if (!mongoose.Types.ObjectId.isValid(params.id)) {
+    if (!mongoose.Types.ObjectId.isValid(id)) {
       return NextResponse.json(
         { success: false, error: 'Invalid shift schedule ID' },
         { status: 400 }
       );
     }
     
-    const shiftSchedule = await ShiftSchedule.findById(params.id);
+    const shiftSchedule = await ShiftSchedule.findById(id);
     if (!shiftSchedule) {
       return NextResponse.json(
         { success: false, error: 'Shift schedule not found' },
@@ -251,8 +298,47 @@ export async function DELETE(
       );
     }
     
-    await ShiftSchedule.findByIdAndDelete(params.id);
+    const locationId = shiftSchedule.location as mongoose.Types.ObjectId;
+    const title = shiftSchedule.title;
+
+    await ShiftSchedule.findByIdAndDelete(id);
     
+    // Send Notifications
+    try {
+      const adminId = user._id as mongoose.Types.ObjectId;
+
+      // 1. Notify Admins
+      await NotificationService.createAdminNotification({
+        type: 'shift_cancelled',
+        title: 'Shift Schedule Cancelled',
+        message: `Manager ${user.firstName} cancelled the shift: "${title}".`,
+        location: locationId,
+        sender: adminId
+      });
+
+      // 2. Notify Assigned Staff
+      if (shiftSchedule.assignedStaff && shiftSchedule.assignedStaff.length > 0) {
+        const staffDocs = await Staff.find({ _id: { $in: shiftSchedule.assignedStaff } }).populate('user');
+        const userIds = staffDocs.map(s => {
+          const staffUser = s.user as any;
+          return staffUser?._id as mongoose.Types.ObjectId;
+        }).filter(Boolean);
+
+        if (userIds.length > 0) {
+          await NotificationService.createBulkNotifications({
+            type: 'shift_cancelled',
+            title: 'Shift Cancelled',
+            message: `Your shift "${title}" has been cancelled.`,
+            location: locationId,
+            sender: adminId,
+            priority: 'high'
+          }, userIds);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to send shift deletion notifications:', err);
+    }
+
     return NextResponse.json({
       success: true,
       message: 'Shift schedule deleted successfully'

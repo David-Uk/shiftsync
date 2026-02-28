@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Bell, Menu, Search, LogOut, Settings, HelpCircle, User } from 'lucide-react';
+import { Bell, Menu, Search, User } from 'lucide-react';
 import Image from 'next/image';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -12,28 +12,42 @@ interface DashboardNavbarProps {
 }
 
 interface Notification {
-  id: string;
+  _id: string;
   title: string;
   message: string;
-  type: 'shift' | 'schedule' | 'system' | 'team';
-  time: string;
-  read: boolean;
+  type: string;
+  isRead: boolean;
   createdAt: string;
+  time?: string;
 }
 
 export function DashboardNavbar({ onMenuToggle, sidebarOpen }: DashboardNavbarProps) {
   const [showNotifications, setShowNotifications] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
   const [loadingNotifications, setLoadingNotifications] = useState(false);
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
+  const router = useRouter();
 
-  // Fetch notifications from API
+  // Helper to format time relative to now
+  const formatTime = (dateString: string) => {
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffInSeconds = Math.floor((now.getTime() - date.getTime()) / 1000);
+    
+    if (diffInSeconds < 60) return 'Just now';
+    if (diffInSeconds < 3600) return `${Math.floor(diffInSeconds / 60)}m ago`;
+    if (diffInSeconds < 86400) return `${Math.floor(diffInSeconds / 3600)}h ago`;
+    return `${Math.floor(diffInSeconds / 86400)}d ago`;
+  };
+
+  // Fetch initial notifications
   const fetchNotifications = async () => {
     try {
       setLoadingNotifications(true);
       const token = localStorage.getItem('token');
-      const response = await fetch('/api/notifications', {
+      const response = await fetch('/api/notifications?unreadOnly=false&limit=10', {
         headers: {
           'Authorization': `Bearer ${token}`,
         },
@@ -42,8 +56,7 @@ export function DashboardNavbar({ onMenuToggle, sidebarOpen }: DashboardNavbarPr
       if (response.ok) {
         const data = await response.json();
         setNotifications(data.notifications || []);
-      } else {
-        console.error('Failed to fetch notifications');
+        setUnreadCount(data.totalUnread || 0);
       }
     } catch (error) {
       console.error('Error fetching notifications:', error);
@@ -52,14 +65,74 @@ export function DashboardNavbar({ onMenuToggle, sidebarOpen }: DashboardNavbarPr
     }
   };
 
-  // Fetch notifications on component mount
+  // Set up real-time notification stream
   useEffect(() => {
-    if (user) {
-      fetchNotifications();
-    }
+    if (!user) return;
+
+    fetchNotifications();
+
+    const token = localStorage.getItem('token');
+    const eventSource = new EventSource(`/api/notifications/stream?token=${token}`);
+
+    eventSource.onmessage = (event) => {
+      try {
+        const payload = JSON.parse(event.data);
+        
+        if (payload.type === 'notifications') {
+          // Update notifications list with new data
+          setNotifications(prev => {
+            const newNotifications = [...payload.data];
+            // Merge unique notifications
+            const existingIds = new Set(prev.map(n => n._id));
+            const filteredNew = newNotifications.filter(n => !existingIds.has(n._id));
+            return [...filteredNew, ...prev].slice(0, 20); // Keep last 20
+          });
+        } else if (payload.type === 'unread_count') {
+          setUnreadCount(payload.data.count);
+        }
+      } catch (err) {
+        console.error('Failed to parse SSE message:', err);
+      }
+    };
+
+    eventSource.onerror = (err) => {
+      console.error('SSE Error:', err);
+      eventSource.close();
+    };
+
+    return () => {
+      eventSource.close();
+    };
   }, [user]);
 
-  const unreadCount = notifications.filter(n => !n.read).length;
+  const handleMarkAsRead = async (id?: string) => {
+    try {
+      const token = localStorage.getItem('token');
+      const url = id ? `/api/notifications/read?id=${id}` : '/api/notifications/read';
+      
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+
+      if (response.ok) {
+        if (id) {
+          setNotifications(prev => prev.map(n => n._id === id ? { ...n, isRead: true } : n));
+          setUnreadCount(prev => Math.max(0, prev - 1));
+        } else {
+          setNotifications(prev => prev.map(n => ({ ...n, isRead: true })));
+          setUnreadCount(0);
+        }
+      }
+    } catch (error) {
+      console.error('Error marking notifications as read:', error);
+    }
+  };
+
+  const handleLogout = async () => {
+    await logout();
+    router.push('/auth/login');
+  };
 
   return (
     <header className="bg-white/80 backdrop-blur-md shadow-sm border-b border-gray-100 shrink-0 sticky top-0 z-50 transition-all duration-300">
@@ -116,7 +189,12 @@ export function DashboardNavbar({ onMenuToggle, sidebarOpen }: DashboardNavbarPr
                   <div className="p-4 border-b border-gray-200">
                     <h3 className="text-sm font-medium text-gray-900">Notifications</h3>
                   </div>
-                  <div className="max-h-96 overflow-y-auto">
+                  <div className="max-h-96 overflow-y-auto relative">
+                    {loadingNotifications && (
+                      <div className="absolute inset-0 bg-white/50 flex items-center justify-center z-10">
+                        <div className="h-4 w-4 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
+                      </div>
+                    )}
                     {notifications.length === 0 ? (
                       <div className="p-4 text-center text-sm text-gray-500">
                         No notifications
@@ -124,25 +202,27 @@ export function DashboardNavbar({ onMenuToggle, sidebarOpen }: DashboardNavbarPr
                     ) : (
                       notifications.map((notification) => (
                         <div
-                          key={notification.id}
-                          className={`p-4 hover:bg-gray-50 border-b border-gray-100 last:border-b-0 ${!notification.read ? 'bg-blue-50' : ''
+                          key={notification._id}
+                          onClick={() => !notification.isRead && handleMarkAsRead(notification._id)}
+                          className={`p-4 hover:bg-gray-50 border-b border-gray-100 last:border-b-0 cursor-pointer ${!notification.isRead ? 'bg-indigo-50/50' : ''
                             }`}
                         >
                           <div className="flex items-start">
                             <div className="flex-1">
-                              <p className="text-sm font-medium text-gray-900">
+                              <p className="text-sm font-semibold text-gray-900 leading-tight">
                                 {notification.title}
                               </p>
-                              <p className="text-sm text-gray-500 mt-1">
+                              <p className="text-sm text-gray-600 mt-1 line-clamp-2">
                                 {notification.message}
                               </p>
-                              <p className="text-xs text-gray-400 mt-1">
-                                {notification.time}
+                              <p className="text-xs text-gray-400 mt-1.5 flex items-center">
+                                <span className="w-1 h-1 rounded-full bg-gray-300 mr-1.5"></span>
+                                {formatTime(notification.createdAt)}
                               </p>
                             </div>
-                            {!notification.read && (
-                              <div className="ml-2">
-                                <div className="h-2 w-2 rounded-full bg-blue-600" />
+                            {!notification.isRead && (
+                              <div className="ml-2 mt-1">
+                                <div className="h-2 w-2 rounded-full bg-indigo-600 animate-pulse" />
                               </div>
                             )}
                           </div>
@@ -216,11 +296,7 @@ export function DashboardNavbar({ onMenuToggle, sidebarOpen }: DashboardNavbarPr
                   </div>
                   <div className="border-t border-gray-200 py-1">
                     <button
-                      onClick={() => {
-                        setShowUserMenu(false);
-                        // Handle logout through auth context
-                        window.location.href = '/auth/login';
-                      }}
+                      onClick={handleLogout}
                       className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
                     >
                       Sign out

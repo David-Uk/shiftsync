@@ -5,6 +5,7 @@ import Location from '@/models/Location';
 import Staff from '@/models/Staff';
 import User from '@/models/User';
 import jwt from 'jsonwebtoken';
+import NotificationService from '@/lib/notificationService';
 
 // Helper function to verify JWT token and get user
 async function getAuthenticatedUser(request: NextRequest) {
@@ -226,10 +227,50 @@ export async function POST(request: NextRequest) {
     
     const shiftSchedule = await ShiftSchedule.create(shiftScheduleData);
     
-    // Populate the response
     await shiftSchedule.populate('location', 'address city timezone');
     await shiftSchedule.populate('manager', 'firstName lastName email');
     await shiftSchedule.populate('assignedStaff', 'designation');
+    
+    // Send Notifications
+    try {
+      const adminId = user._id as mongoose.Types.ObjectId;
+      const shiftId = shiftSchedule._id as mongoose.Types.ObjectId;
+      const locationDoc = shiftSchedule.location as any;
+      const locationId = locationDoc._id as mongoose.Types.ObjectId;
+      const locationAddress = locationDoc.address || 'assigned location';
+
+      // 1. Notify Admins
+      await NotificationService.createAdminNotification({
+        type: 'shift_assigned',
+        title: 'New Shift Schedule Created',
+        message: `Manager ${user.firstName} created a new shift: "${title}" at ${locationAddress}.`,
+        location: locationId,
+        relatedEntity: { type: 'shift', id: shiftId },
+        sender: adminId
+      });
+
+      // 2. Notify Assigned Staff
+      if (assignedStaff && assignedStaff.length > 0) {
+        // We need to notify the users associated with these staff records
+        const staffDocs = await Staff.find({ _id: { $in: assignedStaff } }).populate('user');
+        const userIds = staffDocs.map(s => {
+          const staffUser = s.user as any;
+          return staffUser._id as mongoose.Types.ObjectId;
+        });
+
+        await NotificationService.createBulkNotifications({
+          type: 'shift_assigned',
+          title: 'You Have Been Assigned to a New Shift',
+          message: `You've been assigned to: ${title} at ${locationAddress}.`,
+          location: locationId,
+          relatedEntity: { type: 'shift', id: shiftId },
+          sender: adminId,
+          priority: 'high'
+        }, userIds);
+      }
+    } catch (err) {
+      console.error('Failed to send shift creation notifications:', err);
+    }
     
     return NextResponse.json({
       success: true,

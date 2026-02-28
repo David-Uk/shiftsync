@@ -7,6 +7,8 @@ export interface IUser extends Document {
   password?: string;
   role: 'admin' | 'manager' | 'staff';
   profileImage?: string;
+  phone?: string;
+  designation?: string;
   isArchived: boolean;
   passwordResetToken?: string;
   passwordResetExpiry?: Date;
@@ -31,6 +33,14 @@ const UserSchema: Schema<IUser> = new Schema(
           return cloudinaryRegex.test(v);
         },
         message: 'Invalid profile image URL format'
+      }
+    },
+    phone: { type: String, trim: true },
+    designation: { 
+      type: String, 
+      enum: ['bartender', 'line cook', 'host', 'waiter', 'security', 'janitor', 'accountant'],
+      required: function(this: IUser) {
+        return this.role === 'staff';
       }
     },
     isArchived: { type: Boolean, default: false },

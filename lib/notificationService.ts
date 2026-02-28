@@ -6,7 +6,7 @@ import { Types } from 'mongoose';
 export type NotificationEvent = {
   type: 'shift_assigned' | 'shift_cancelled' | 'shift_updated' | 'schedule_published' | 
         'schedule_updated' | 'location_created' | 'location_updated' | 'user_created' | 
-        'user_updated' | 'user_role_changed' | 'leave_request' | 'leave_approved' | 
+        'user_updated' | 'user_role_changed' | 'user_archived' | 'leave_request' | 'leave_approved' | 
         'leave_rejected' | 'clock_in' | 'clock_out' | 'emergency' | 'system_maintenance' | 'announcement';
   title: string;
   message: string;

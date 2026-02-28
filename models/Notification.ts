@@ -13,6 +13,7 @@ export type NotificationType =
   | 'user_created'
   | 'user_updated'
   | 'user_role_changed'
+  | 'user_archived'
   | 'leave_request'
   | 'leave_approved'
   | 'leave_rejected'
@@ -45,9 +46,7 @@ export interface INotification extends Document {
   updatedAt: Date;
 }
 
-export interface INotificationMethods {
-  // Instance methods can be added here if needed
-}
+export type INotificationMethods = object;
 
 export interface INotificationStatics {
   createNotification(notificationData: Partial<INotification>): Promise<INotification>;
@@ -99,6 +98,7 @@ const NotificationSchema: Schema<INotification> = new Schema(
         'user_created',
         'user_updated',
         'user_role_changed',
+        'user_archived',
         'leave_request',
         'leave_approved',
         'leave_rejected',
@@ -292,7 +292,7 @@ NotificationSchema.statics.markAsRead = async function(
   userId: Types.ObjectId,
   notificationIds?: Types.ObjectId[]
 ) {
-  const query: any = { recipient: userId, isRead: false };
+  const query: Record<string, unknown> = { recipient: userId, isRead: false };
   
   if (notificationIds && notificationIds.length > 0) {
     query._id = { $in: notificationIds };

@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import type { FilterQuery } from 'mongoose';
+import mongoose from 'mongoose';
 import bcrypt from 'bcryptjs';
 import connectToDatabase from '@/lib/mongodb';
 import User, { IUser } from '@/models/User';
 import { verifyAuth, verifyAdmin } from '@/lib/auth';
 import { sanitizeUserCreation } from '@/lib/validation';
 import { handleImageUpload, validateContentType } from '@/lib/uploadMiddleware';
+import NotificationService from '@/lib/notificationService';
 
 export async function POST(req: NextRequest) {
   try {
@@ -14,6 +15,8 @@ export async function POST(req: NextRequest) {
     // Check if any admin users already exist
     const existingAdmin = await User.findOne({ role: 'admin' });
     
+    let adminId: mongoose.Types.ObjectId | undefined;
+    
     // If no admin exists, allow creation of first admin without authentication
     // Otherwise, require admin authentication
     if (existingAdmin) {
@@ -21,6 +24,7 @@ export async function POST(req: NextRequest) {
       if ('error' in adminCheck) {
         return NextResponse.json({ message: adminCheck.error }, { status: adminCheck.status });
       }
+      adminId = adminCheck.user?._id as mongoose.Types.ObjectId;
     }
 
     // Check if this is a multipart form request (with image)
@@ -84,6 +88,20 @@ export async function POST(req: NextRequest) {
       ? 'First admin user created successfully. You can now log in and create additional users.'
       : 'User created successfully';
 
+    // Notify Admins about new user creation
+    try {
+      await NotificationService.createAdminNotification({
+        type: 'user_created',
+        title: 'New User Registered',
+        message: `${newUser.firstName} ${newUser.lastName} has been registered as a ${newUser.role}.`,
+        relatedEntity: { type: 'user', id: newUser._id as mongoose.Types.ObjectId },
+        priority: 'medium',
+        sender: adminId as mongoose.Types.ObjectId
+      });
+    } catch (notificationError) {
+      console.error('Failed to send user creation notification:', notificationError);
+    }
+
     return NextResponse.json(
       { 
         message: successMessage, 
@@ -123,7 +141,7 @@ export async function GET(req: NextRequest) {
     const roleFilter = searchParams.get('role') || '';
 
     // Build query
-    const query: FilterQuery<IUser> = {};
+    const query: mongoose.FilterQuery<IUser> = {};
     if (search) {
       query.$or = [
         { firstName: { $regex: search, $options: 'i' } },

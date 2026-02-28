@@ -3,6 +3,7 @@ import Location from '@/models/Location';
 import User from '@/models/User';
 import { verifyAuth, verifyAdmin } from '@/lib/auth';
 import connectToDatabase from '@/lib/mongodb';
+import NotificationService from '@/lib/notificationService';
 
 // GET unassigned managers
 export async function GET(request: NextRequest) {
@@ -177,6 +178,28 @@ export async function POST(request: NextRequest) {
     await location.populate('manager', 'firstName lastName email');
     await location.populate('createdBy', 'firstName lastName email');
     
+
+
+    // Send notification to the manager
+    try {
+      await NotificationService.createNotification({
+        type: 'location_created',
+        title: 'New Location Assignment',
+        message: `You have been assigned as a manager for the new location: ${location.address}, ${location.city}.`,
+        recipient: new mongoose.Types.ObjectId(manager),
+        sender: createdBy as mongoose.Types.ObjectId,
+        location: location._id as mongoose.Types.ObjectId,
+        relatedEntity: {
+          type: 'location',
+          id: location._id as mongoose.Types.ObjectId
+        },
+        priority: 'high'
+      });
+    } catch (notificationError) {
+      console.error('Failed to send location creation notification:', notificationError);
+      // Don't fail the whole request if notification fails
+    }
+
     return NextResponse.json({
       success: true,
       data: location

@@ -55,7 +55,8 @@ export default function MyShiftsPage() {
           const data = await response.json();
           setShifts(data.shifts || []);
         } else {
-          throw new Error('Failed to fetch shifts');
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(errorData.message || 'Failed to fetch shifts');
         }
       } catch (error) {
         console.error('Error fetching shifts:', error);

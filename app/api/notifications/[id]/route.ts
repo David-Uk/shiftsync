@@ -6,9 +6,10 @@ import { verifyAuth } from '@/lib/auth';
 // DELETE /api/notifications/[id] - Delete a notification
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params;
     await connectToDatabase();
     
     const auth = await verifyAuth(request);
@@ -17,7 +18,7 @@ export async function DELETE(
     }
 
     const user = auth.user!;
-    const notificationId = params.id;
+    const notificationId = id;
 
     // Find and delete the notification (only if it belongs to the user)
     const notification = await Notification.findOneAndDelete({

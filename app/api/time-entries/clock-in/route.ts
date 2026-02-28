@@ -5,6 +5,8 @@ import Schedule from '@/models/Schedule';
 import Staff from '@/models/Staff';
 import jwt from 'jsonwebtoken';
 import User from '@/models/User';
+import NotificationService from '@/lib/notificationService';
+import Location from '@/models/Location';
 
 // Helper function to verify JWT token and get user
 async function getAuthenticatedUser(request: NextRequest) {
@@ -176,6 +178,41 @@ export async function POST(request: NextRequest) {
     await timeEntry.populate('schedule', 'startTime endTime workDays timezone');
     await timeEntry.populate('location', 'address city');
     
+    // Send Notifications
+    try {
+      const staffUser = await User.findById(staff.user);
+      const staffName = staffUser ? `${staffUser.firstName} ${staffUser.lastName}` : 'Staff Member';
+      const staffUserId = staffUser?._id as mongoose.Types.ObjectId;
+
+      // 1. Notify Admin
+      await NotificationService.createAdminNotification({
+        type: 'clock_in',
+        title: 'Staff Clocked In',
+        message: `${staffName} clocked in at ${timeEntry.location ? 'assigned location' : 'location'}.`,
+        location: timeEntry.location as mongoose.Types.ObjectId,
+        relatedEntity: { type: 'user', id: staffUserId },
+        sender: staffUserId
+      });
+
+      // 2. Notify Location Manager
+      if (timeEntry.location) {
+        const locationDoc = await Location.findById(timeEntry.location);
+        if (locationDoc && locationDoc.manager) {
+          await NotificationService.createNotification({
+            type: 'clock_in',
+            title: 'Staff Arrival',
+            message: `${staffName} has just clocked in for their shift.`,
+            recipient: locationDoc.manager as mongoose.Types.ObjectId,
+            location: locationDoc._id as mongoose.Types.ObjectId,
+            relatedEntity: { type: 'user', id: staffUserId },
+            sender: staffUserId
+          });
+        }
+      }
+    } catch (err) {
+      console.error('Failed to send clock-in notifications:', err);
+    }
+
     return NextResponse.json({
       success: true,
       data: {

@@ -4,6 +4,8 @@ import TimeEntry from '@/models/TimeEntry';
 import Staff from '@/models/Staff';
 import jwt from 'jsonwebtoken';
 import User from '@/models/User';
+import NotificationService from '@/lib/notificationService';
+import Location from '@/models/Location';
 
 // Helper function to verify JWT token and get user
 async function getAuthenticatedUser(request: NextRequest) {
@@ -103,6 +105,42 @@ export async function POST(request: NextRequest) {
     await activeEntry.populate('schedule', 'startTime endTime workDays timezone');
     await activeEntry.populate('location', 'address city');
     
+    // Send Notifications
+    try {
+      const staffUser = await User.findById(staff.user);
+      const staffName = staffUser ? `${staffUser.firstName} ${staffUser.lastName}` : 'Staff Member';
+      const staffUserId = staffUser?._id as mongoose.Types.ObjectId;
+      const durationHours = Math.round(duration / 60 * 100) / 100;
+
+      // 1. Notify Admin
+      await NotificationService.createAdminNotification({
+        type: 'clock_out',
+        title: 'Staff Clocked Out',
+        message: `${staffName} clocked out. Duration: ${durationHours} hours.`,
+        location: activeEntry.location as mongoose.Types.ObjectId,
+        relatedEntity: { type: 'user', id: staffUserId },
+        sender: staffUserId
+      });
+
+      // 2. Notify Location Manager
+      if (activeEntry.location) {
+        const locationDoc = await Location.findById(activeEntry.location);
+        if (locationDoc && locationDoc.manager) {
+          await NotificationService.createNotification({
+            type: 'clock_out',
+            title: 'Staff Departure',
+            message: `${staffName} has just clocked out. Work duration: ${durationHours}h.`,
+            recipient: locationDoc.manager as mongoose.Types.ObjectId,
+            location: locationDoc._id as mongoose.Types.ObjectId,
+            relatedEntity: { type: 'user', id: staffUserId },
+            sender: staffUserId
+          });
+        }
+      }
+    } catch (err) {
+      console.error('Failed to send clock-out notifications:', err);
+    }
+
     return NextResponse.json({
       success: true,
       data: {
