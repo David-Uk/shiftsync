@@ -44,15 +44,15 @@ export function sanitizeName(name: string): string {
 }
 
 // Sanitize role
-export function sanitizeRole(role: string): 'admin' | 'manager' | 'user' {
+export function sanitizeRole(role: string): 'admin' | 'manager' | 'staff' {
   const sanitized = sanitizeString(role);
-  const validRoles = ['admin', 'manager', 'user'];
+  const validRoles = ['admin', 'manager', 'staff'];
   
   if (!validRoles.includes(sanitized)) {
-    throw new Error('Invalid role. Must be admin, manager, or user');
+    throw new Error('Invalid role. Must be admin, manager, or staff');
   }
   
-  return sanitized as 'admin' | 'manager' | 'user';
+  return sanitized as 'admin' | 'manager' | 'staff';
 }
 
 // Sanitize password (basic validation, actual hashing done separately)

@@ -10,7 +10,6 @@ import {
   Clock,
   Settings,
   BarChart3,
-  FileText,
   UserCheck,
   MapPin,
   LogOut
@@ -66,11 +65,6 @@ export function DashboardSidebar({ isOpen, onClose }: { isOpen: boolean; onClose
       href: '/reports',
       icon: <BarChart3 className="h-5 w-5" />,
       roles: ['admin', 'manager'],
-    },
-    {
-      label: 'Documents',
-      href: '/documents',
-      icon: <FileText className="h-5 w-5" />,
     },
     {
       label: 'Settings',

@@ -31,6 +31,26 @@ export async function verifyAuth(req: NextRequest) {
   }
 }
 
+export async function verifyToken(token: string) {
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET) as { id: string, role: string };
+    await connectToDatabase();
+    const user = await User.findById(decoded.id);
+
+    if (!user) {
+      return null;
+    }
+
+    if (user.isArchived) {
+      return null;
+    }
+
+    return user;
+  } catch (error) {
+    return null;
+  }
+}
+
 export async function verifyAdmin(req: NextRequest) {
   const auth = await verifyAuth(req);
   if (auth.error) {

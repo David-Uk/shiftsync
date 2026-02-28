@@ -269,6 +269,14 @@ export function NotificationProvider({ children }: NotificationProviderProps) {
     eventSource.onerror = (error) => {
       console.error('Notification stream error:', error);
       eventSource.close();
+
+      // Try to reconnect after a delay
+      setTimeout(() => {
+        if (user && token) {
+          console.log('Attempting to reconnect notification stream...');
+          // The useEffect will handle reconnection
+        }
+      }, 5000);
     };
 
     return () => {

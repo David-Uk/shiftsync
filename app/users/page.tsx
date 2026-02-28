@@ -1,11 +1,11 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 import { useAuth } from '@/contexts/AuthContext';
 import DashboardLayout from '@/components/DashboardLayout';
-import { Users, Mail, Shield, Plus, Edit, Trash2, Save, RefreshCw, Eye, EyeOff } from 'lucide-react';
+import { Users, Plus, Edit, Trash2, Save, RefreshCw, Eye, EyeOff } from 'lucide-react';
 
 interface User {
   _id: string;
@@ -14,6 +14,7 @@ interface User {
   email: string;
   role: 'admin' | 'manager' | 'staff';
   status: 'active' | 'inactive' | 'archived';
+  isArchived?: boolean;
   profileImage?: string;
   phone?: string;
   createdAt: string;
@@ -32,44 +33,26 @@ export default function UsersPage() {
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [isEditMode, setIsEditMode] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [pagination, setPagination] = useState({
+    page: 1,
+    limit: 10,
+    total: 0,
+    pages: 1,
+    hasNext: false,
+    hasPrev: false
+  });
 
-  useEffect(() => {
-    if (!isAuthenticated) {
-      router.push('/auth/login');
-      return;
-    }
-
-    const fetchUsers = async () => {
-      try {
-        const token = localStorage.getItem('token');
-        const response = await fetch('/api/users', {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-          },
-        });
-
-        if (response.ok) {
-          const data = await response.json();
-          setUsers(data.users || []);
-        } else {
-          throw new Error('Failed to fetch users');
-        }
-      } catch (error) {
-        console.error('Error fetching users:', error);
-      } finally {
-        setLoading(false);
-        setRefreshing(false);
-      }
-    };
-
-    fetchUsers();
-  }, [isAuthenticated, searchTerm, roleFilter, router]);
-
-  const handleRefresh = async () => {
-    setRefreshing(true);
+  const fetchUsers = useCallback(async () => {
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch('/api/users', {
+      const params = new URLSearchParams({
+        page: pagination.page.toString(),
+        limit: pagination.limit.toString(),
+        search: searchTerm,
+        role: roleFilter
+      });
+
+      const response = await fetch(`/api/users?${params}`, {
         headers: {
           'Authorization': `Bearer ${token}`,
         },
@@ -77,15 +60,35 @@ export default function UsersPage() {
 
       if (response.ok) {
         const data = await response.json();
-        setUsers(data.users || []);
+        const mappedUsers = (data.users || []).map((u: User) => ({
+          ...u,
+          status: u.status || (u.isArchived ? 'archived' : 'active')
+        }));
+        setUsers(mappedUsers);
+        setPagination(data.pagination || pagination);
       } else {
-        throw new Error('Failed to refresh users');
+        throw new Error('Failed to fetch users');
       }
     } catch (error) {
-      console.error('Error refreshing users:', error);
+      console.error('Error fetching users:', error);
     } finally {
+      setLoading(false);
       setRefreshing(false);
     }
+  }, [searchTerm, roleFilter, pagination.page, pagination.limit]);
+
+  useEffect(() => {
+    if (!isAuthenticated) {
+      router.push('/auth/login');
+      return;
+    }
+
+    fetchUsers();
+  }, [isAuthenticated, searchTerm, roleFilter, pagination.page, pagination.limit, fetchUsers, router]);
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    await fetchUsers();
   };
 
   const filteredUsers = users.filter(user => {
@@ -172,11 +175,10 @@ export default function UsersPage() {
         });
 
         if (response.ok) {
-          setUsers(prev =>
-            prev.map(user =>
-              user._id === selectedUser._id ? selectedUser : user
-            )
-          );
+          // Show success message
+          alert('User updated successfully!');
+          // Refresh users list
+          await handleRefresh();
         } else {
           throw new Error('Failed to update user');
         }
@@ -197,7 +199,10 @@ export default function UsersPage() {
 
         if (response.ok) {
           const result = await response.json();
-          setUsers(prev => [...prev, result.user]);
+          // Show success message
+          alert('User created successfully!');
+          // Refresh users list
+          await handleRefresh();
         } else {
           const errorData = await response.json();
           throw new Error(errorData.message || 'Failed to create user');
@@ -399,9 +404,11 @@ export default function UsersPage() {
                     <td className="px-6 py-4 whitespace-nowrap">
                       <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${userItem.role === 'admin' ? 'bg-purple-100 text-purple-800' :
                         userItem.role === 'manager' ? 'bg-blue-100 text-blue-800' :
-                          'bg-green-100 text-green-800'
+                          userItem.role === 'staff' ? 'bg-green-100 text-green-800' :
+                            userItem.role === 'user' ? 'bg-gray-100 text-gray-800' : // Handle legacy 'user' role
+                              'bg-green-100 text-green-800'
                         }`}>
-                        {userItem.role}
+                        {userItem.role === 'user' ? 'staff' : userItem.role} // Convert 'user' to 'staff' for display
                       </span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">

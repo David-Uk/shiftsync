@@ -73,6 +73,7 @@ export async function POST(req: NextRequest) {
       email: sanitizedData.email,
       password: hashedPassword,
       role: sanitizedData.role,
+      status: 'active', // Set default status for new users
       profileImage: sanitizedData.profileImage,
     });
 
@@ -83,7 +84,7 @@ export async function POST(req: NextRequest) {
       : 'User created successfully';
 
     return NextResponse.json(
-      { message: successMessage, user: { id: newUser._id, email: newUser.email, role: newUser.role, profileImage: newUser.profileImage } },
+      { message: successMessage, user: { id: newUser._id, email: newUser.email, role: newUser.role, status: newUser.status, profileImage: newUser.profileImage } },
       { status: 201 }
     );
   } catch (error: unknown) {
@@ -100,9 +101,51 @@ export async function GET(req: NextRequest) {
     }
 
     await connectToDatabase();
-    // Return all users
-    const users = await User.find({}).select('-password');
-    return NextResponse.json({ users }, { status: 200 });
+    
+    // Get pagination parameters
+    const { searchParams } = new URL(req.url);
+    const page = parseInt(searchParams.get('page') || '1');
+    const limit = parseInt(searchParams.get('limit') || '10');
+    const skip = (page - 1) * limit;
+
+    // Get search term
+    const search = searchParams.get('search') || '';
+    const roleFilter = searchParams.get('role') || '';
+
+    // Build query
+    const query: any = {};
+    if (search) {
+      query.$or = [
+        { firstName: { $regex: search, $options: 'i' } },
+        { lastName: { $regex: search, $options: 'i' } },
+        { email: { $regex: search, $options: 'i' } }
+      ];
+    }
+    if (roleFilter && roleFilter !== 'all') {
+      query.role = roleFilter;
+    }
+
+    // Get total count for pagination
+    const total = await User.countDocuments(query);
+
+    // Get paginated users
+    const users = await User.find(query)
+      .select('-password')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit);
+
+    return NextResponse.json({ 
+      users,
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit),
+        hasNext: page * limit < total,
+        hasPrev: page > 1
+      }
+    }, { status: 200 });
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
     return NextResponse.json({ message: 'Internal server error', error: errorMessage }, { status: 500 });

@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { verifyAuth } from '@/lib/auth';
+import { verifyToken } from '@/lib/auth';
 import Notification from '@/models/Notification';
 import Location from '@/models/Location';
 import connectToDatabase from '@/lib/mongodb';
@@ -14,13 +14,13 @@ export async function GET(request: NextRequest) {
     return new Response('Token is required', { status: 401 });
   }
 
-  // Verify the token
-  const auth = await verifyAuth(request);
-  if (auth.error) {
+  // Verify token directly instead of using verifyAuth (which expects headers)
+  const auth = await verifyToken(token);
+  if (!auth) {
     return new Response('Unauthorized', { status: 401 });
   }
 
-  const user = auth.user!;
+  const user = auth;
 
   // Create a readable stream
   const stream = new ReadableStream({
