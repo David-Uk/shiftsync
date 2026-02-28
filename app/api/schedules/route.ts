@@ -4,6 +4,7 @@ import Schedule from '@/models/Schedule';
 import Staff from '@/models/Staff';
 import jwt from 'jsonwebtoken';
 import User from '@/models/User';
+import { createNotificationForEvent } from '@/lib/notificationMiddleware';
 
 // Helper function to verify JWT token and get user
 async function getAuthenticatedUser(request: NextRequest) {
@@ -19,7 +20,7 @@ async function getAuthenticatedUser(request: NextRequest) {
     await mongoose.connect(process.env.MONGODB_URI!);
     const user = await User.findById(decoded.userId);
     
-    if (!user || (user.role !== 'admin' && user.role !== 'manager' && user.role !== 'user')) {
+    if (!user || (user.role !== 'admin' && user.role !== 'manager' && user.role !== 'staff')) {
       return null;
     }
 
@@ -177,6 +178,18 @@ export async function POST(request: NextRequest) {
     
     // Populate the response
     await schedule.populate('location', 'address city timezone');
+    
+    // Create notification for the staff member about their new schedule
+    await createNotificationForEvent(
+      request,
+      'schedule_published',
+      {
+        scheduleId: schedule._id.toString(),
+        weekStart: startTime,
+        weekEnd: endTime
+      },
+      [user._id.toString()]
+    );
     
     return NextResponse.json({
       success: true,

@@ -19,7 +19,7 @@ async function getAuthenticatedUser(request: NextRequest) {
     await mongoose.connect(process.env.MONGODB_URI!);
     const user = await User.findById(decoded.userId);
     
-    if (!user || (user.role !== 'admin' && user.role !== 'manager' && user.role !== 'user')) {
+    if (!user || (user.role !== 'admin' && user.role !== 'manager' && user.role !== 'staff')) {
       return null;
     }
 
@@ -97,7 +97,7 @@ export async function GET(request: NextRequest) {
     
     // Convert to local timezone if requested
     const processedSchedules = timezone 
-      ? shiftSchedules.map(schedule => (schedule as any).toLocalShiftSchedule())
+      ? shiftSchedules.map(schedule => schedule.toLocalShiftSchedule())
       : shiftSchedules;
     
     const total = await ShiftSchedule.countDocuments(filter);

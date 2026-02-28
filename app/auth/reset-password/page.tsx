@@ -64,7 +64,7 @@ export default function ResetPasswordPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (!validateForm()) {
       return;
     }
@@ -105,7 +105,7 @@ export default function ResetPasswordPage() {
 
   const getPasswordStrength = (password: string) => {
     if (!password) return { strength: 0, text: '', color: '' };
-    
+
     let strength = 0;
     if (password.length >= 6) strength++;
     if (password.length >= 10) strength++;
@@ -129,7 +129,7 @@ export default function ResetPasswordPage() {
 
   if (tokenValid === false) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100 px-4">
+      <div className="min-h-screen flex items-center justify-center linear-to-br from-blue-50 to-indigo-100 px-4">
         <div className="max-w-md w-full space-y-8">
           <div className="text-center">
             <div className="mx-auto flex items-center justify-center h-16 w-16 rounded-full bg-red-100 mb-4">
@@ -163,7 +163,7 @@ export default function ResetPasswordPage() {
                 >
                   Request new reset link
                 </Link>
-                
+
                 <Link
                   href="/auth/login"
                   className="w-full flex justify-center py-2 px-4 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors text-center"
@@ -180,7 +180,7 @@ export default function ResetPasswordPage() {
 
   if (isSuccess) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100 px-4">
+      <div className="min-h-screen flex items-center justify-center bg-linear-to-br from-blue-50 to-indigo-100 px-4">
         <div className="max-w-md w-full space-y-8">
           <div className="text-center">
             <div className="mx-auto flex items-center justify-center h-16 w-16 rounded-full bg-green-100 mb-4">
@@ -198,7 +198,7 @@ export default function ResetPasswordPage() {
             <div className="space-y-4">
               <div className="bg-green-50 border border-green-200 rounded-md p-4">
                 <h3 className="text-sm font-medium text-green-800 mb-2">
-                  What's next?
+                  What&apos;s next?
                 </h3>
                 <ul className="text-sm text-green-700 space-y-1">
                   <li>• You can now sign in with your new password</li>
@@ -221,7 +221,7 @@ export default function ResetPasswordPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100 px-4">
+    <div className="min-h-screen flex items-center justify-center bg-linear-to-br from-blue-50 to-indigo-100 px-4">
       <div className="max-w-md w-full space-y-8">
         <div className="text-center">
           <h2 className="mt-6 text-3xl font-bold text-gray-900">
@@ -236,7 +236,7 @@ export default function ResetPasswordPage() {
           <form className="space-y-6" onSubmit={handleSubmit}>
             {error && (
               <div className="bg-red-50 border border-red-200 rounded-md p-4 flex items-center space-x-2">
-                <AlertCircle className="h-5 w-5 text-red-500 flex-shrink-0" />
+                <AlertCircle className="h-5 w-5 text-red-500 shrink-0" />
                 <p className="text-sm text-red-600">{error}</p>
               </div>
             )}
