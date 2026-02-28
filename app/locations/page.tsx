@@ -20,6 +20,16 @@ interface Location {
   createdAt: string;
 }
 
+interface Manager {
+  _id: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  role: string;
+  isAvailable: boolean;
+  assignedLocationCount: number;
+}
+
 export default function LocationsPage() {
   const { user, isAuthenticated } = useAuth();
   const router = useRouter();
@@ -27,6 +37,14 @@ export default function LocationsPage() {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [showCreateForm, setShowCreateForm] = useState(false);
+  const [managers, setManagers] = useState<Manager[]>([]);
+  const [formData, setFormData] = useState({
+    address: '',
+    city: '',
+    timezone: '',
+    manager: ''
+  });
+  const [formLoading, setFormLoading] = useState(false);
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -50,7 +68,7 @@ export default function LocationsPage() {
 
         if (response.ok) {
           const data = await response.json();
-          setLocations(data.locations || []);
+          setLocations(data.data || []);
         } else {
           throw new Error('Failed to fetch locations');
         }
@@ -61,8 +79,56 @@ export default function LocationsPage() {
       }
     };
 
+    const fetchManagers = async () => {
+      try {
+        const token = localStorage.getItem('token');
+        
+        // 1. Fetch all users with manager role
+        const usersResponse = await fetch('/api/users?role=manager&limit=100', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        
+        // 2. Fetch all locations to see which managers are already assigned
+        const locationsResponse = await fetch('/api/locations?limit=100', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+
+        if (usersResponse.ok && locationsResponse.ok) {
+          const userData = await usersResponse.json();
+          const locationData = await locationsResponse.json();
+          
+          const allUsers = userData.users || [];
+          const allLocations = locationData.data || [];
+          
+          // Get IDs of managers already assigned to a location
+          const assignedManagerIds = new Set(allLocations.map((loc: any) => 
+            typeof loc.manager === 'object' ? loc.manager._id : loc.manager
+          ));
+
+          const mappedManagers = allUsers.map((u: any) => ({
+            _id: u._id,
+            firstName: u.firstName,
+            lastName: u.lastName,
+            email: u.email,
+            role: u.role,
+            isAvailable: !assignedManagerIds.has(u._id),
+            assignedLocationCount: assignedManagerIds.has(u._id) ? 1 : 0
+          }));
+
+          setManagers(mappedManagers);
+        } else {
+          throw new Error('Failed to fetch manager data');
+        }
+      } catch (error) {
+        console.error('Error fetching managers:', error);
+      }
+    };
+
     fetchLocations();
-  }, [isAuthenticated, searchTerm, router]);
+    if (user?.role === 'admin') {
+      fetchManagers();
+    }
+  }, [isAuthenticated, searchTerm, user?.role, router]);
 
   const filteredLocations = locations.filter(location =>
     location.address.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -85,12 +151,58 @@ export default function LocationsPage() {
       });
 
       if (response.ok) {
-        setLocations(prev => prev.filter(location => location._id !== locationId));
+        setLocations(prev => prev.filter(loc => loc._id !== locationId));
       } else {
         throw new Error('Failed to delete location');
       }
     } catch (error) {
       console.error('Error deleting location:', error);
+    }
+  };
+
+  const handleCreateLocation = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (!formData.address || !formData.city || !formData.timezone || !formData.manager) {
+      alert('Please fill in all required fields');
+      return;
+    }
+
+    setFormLoading(true);
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch('/api/locations', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          ...formData,
+          createdBy: user?._id || user?.id
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setLocations(prev => [data.data, ...prev]);
+        setShowCreateForm(false);
+        setFormData({
+          address: '',
+          city: '',
+          timezone: '',
+          manager: ''
+        });
+        alert('Location created successfully!');
+      } else {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to create location');
+      }
+    } catch (error) {
+      console.error('Error creating location:', error);
+      alert(error instanceof Error ? error.message : 'An error occurred');
+    } finally {
+      setFormLoading(false);
     }
   };
 
@@ -112,7 +224,7 @@ export default function LocationsPage() {
         <div className="text-center">
           <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-lg">
             <h2 className="text-lg font-bold mb-2">Access Denied</h2>
-            <p className="text-red-700">You don't have permission to access this page.</p>
+            <p className="text-red-700">You don&apos;t have permission to access this page.</p>
             <button
               onClick={() => router.push('/dashboard')}
               className="mt-4 bg-red-600 text-white px-4 py-2 rounded-md hover:bg-red-700"
@@ -150,17 +262,141 @@ export default function LocationsPage() {
 
         {/* Create Form Modal */}
         {showCreateForm && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center">
-            <div className="bg-white rounded-lg p-6 w-full max-w-md mx-4">
-              <h2 className="text-lg font-semibold text-gray-900 mb-4">Create New Location</h2>
-              <button
-                onClick={() => setShowCreateForm(false)}
-                className="absolute top-4 right-4 text-gray-400 hover:text-gray-600"
-              >
-                ×
-              </button>
-              {/* Form fields would go here */}
-              <p className="text-gray-600">Location creation form would be implemented here...</p>
+          <div className="fixed inset-0 bg-gray-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4 transition-opacity duration-300">
+            <div className="bg-white/95 backdrop-blur-md rounded-2xl shadow-2xl border border-white/20 max-w-md w-full max-h-[90vh] overflow-y-auto transform transition-all">
+              <div className="p-6">
+                <div className="flex items-center justify-between mb-5 pb-3 border-b border-gray-100">
+                  <h2 className="text-lg font-bold bg-clip-text text-transparent bg-gradient-to-r from-gray-900 to-gray-600">
+                    Create New Location
+                  </h2>
+                  <button
+                    onClick={() => setShowCreateForm(false)}
+                    className="p-1.5 text-gray-400 bg-gray-50 rounded-full hover:text-gray-600 hover:bg-gray-100 transition-colors"
+                  >
+                    ×
+                  </button>
+                </div>
+
+                <form onSubmit={handleCreateLocation} className="space-y-3.5">
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1.5">
+                      Address *
+                    </label>
+                    <input
+                      type="text"
+                      value={formData.address}
+                      onChange={(e) => setFormData(prev => ({ ...prev, address: e.target.value }))}
+                      className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all duration-200 outline-none text-sm"
+                      placeholder="123 Main St"
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1.5">
+                      City *
+                    </label>
+                    <input
+                      type="text"
+                      value={formData.city}
+                      onChange={(e) => setFormData(prev => ({ ...prev, city: e.target.value }))}
+                      className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all duration-200 outline-none text-sm"
+                      placeholder="New York"
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1.5">
+                      Timezone *
+                    </label>
+                    <select
+                      value={formData.timezone}
+                      onChange={(e) => setFormData(prev => ({ ...prev, timezone: e.target.value }))}
+                      className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all duration-200 font-medium text-gray-700 outline-none text-sm"
+                      required
+                    >
+                      <option value="">Select timezone</option>
+                      <option value="GMT-12">GMT-12</option>
+                      <option value="GMT-11">GMT-11</option>
+                      <option value="GMT-10">GMT-10</option>
+                      <option value="GMT-9">GMT-9</option>
+                      <option value="GMT-8">GMT-8</option>
+                      <option value="GMT-7">GMT-7</option>
+                      <option value="GMT-6">GMT-6</option>
+                      <option value="GMT-5">GMT-5</option>
+                      <option value="GMT-4">GMT-4</option>
+                      <option value="GMT-3">GMT-3</option>
+                      <option value="GMT-2">GMT-2</option>
+                      <option value="GMT-1">GMT-1</option>
+                      <option value="GMT+0">GMT+0</option>
+                      <option value="GMT+1">GMT+1</option>
+                      <option value="GMT+2">GMT+2</option>
+                      <option value="GMT+3">GMT+3</option>
+                      <option value="GMT+4">GMT+4</option>
+                      <option value="GMT+5">GMT+5</option>
+                      <option value="GMT+6">GMT+6</option>
+                      <option value="GMT+7">GMT+7</option>
+                      <option value="GMT+8">GMT+8</option>
+                      <option value="GMT+9">GMT+9</option>
+                      <option value="GMT+10">GMT+10</option>
+                      <option value="GMT+11">GMT+11</option>
+                      <option value="GMT+12">GMT+12</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1.5">
+                      Manager *
+                    </label>
+                    <select
+                      value={formData.manager}
+                      onChange={(e) => setFormData(prev => ({ ...prev, manager: e.target.value }))}
+                      className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all duration-200 font-medium text-gray-700 outline-none text-sm"
+                      required
+                    >
+                      <option value="">Select manager</option>
+                      {managers.map((manager) => (
+                        <option 
+                          key={manager._id} 
+                          value={manager._id} 
+                          disabled={!manager.isAvailable}
+                          className={manager.isAvailable ? "text-green-600" : "text-gray-400"}
+                        >
+                          {manager.isAvailable ? '✅' : '🚫'} {manager.firstName} {manager.lastName} ({manager.email}) {manager.isAvailable ? '- Available' : '- Already Assigned'}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="flex justify-end space-x-3 mt-6 pt-4 border-t border-gray-100">
+                    <button
+                      type="button"
+                      onClick={() => setShowCreateForm(false)}
+                      className="px-4 py-2 bg-white border border-gray-200 rounded-xl text-gray-700 font-medium hover:bg-gray-50 hover:shadow-sm transition-all duration-200 text-sm"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={formLoading}
+                      className="px-4 py-2 bg-gradient-to-r from-indigo-600 to-indigo-700 text-white rounded-xl shadow-md shadow-indigo-200/50 hover:shadow-lg hover:shadow-indigo-300/50 hover:-translate-y-0.5 transition-all duration-200 flex items-center font-medium text-sm disabled:opacity-50"
+                    >
+                      {formLoading ? (
+                        <>
+                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                          Creating...
+                        </>
+                      ) : (
+                        <>
+                          <Plus className="h-4 w-4 mr-1.5" />
+                          Create Location
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </form>
+              </div>
             </div>
           </div>
         )}
@@ -198,7 +434,7 @@ export default function LocationsPage() {
               </p>
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 p-6">
               {filteredLocations.map((location) => (
                 <div
                   key={location._id}

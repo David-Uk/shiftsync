@@ -404,11 +404,9 @@ export default function UsersPage() {
                     <td className="px-6 py-4 whitespace-nowrap">
                       <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${userItem.role === 'admin' ? 'bg-purple-100 text-purple-800' :
                         userItem.role === 'manager' ? 'bg-blue-100 text-blue-800' :
-                          userItem.role === 'staff' ? 'bg-green-100 text-green-800' :
-                            userItem.role === 'user' ? 'bg-gray-100 text-gray-800' : // Handle legacy 'user' role
-                              'bg-green-100 text-green-800'
+                          'bg-green-100 text-green-800'
                         }`}>
-                        {userItem.role === 'user' ? 'staff' : userItem.role} // Convert 'user' to 'staff' for display
+                        {userItem.role}
                       </span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">

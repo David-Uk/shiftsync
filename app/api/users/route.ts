@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import bcrypt from 'bcryptjs';
 import connectToDatabase from '@/lib/mongodb';
 import User from '@/models/User';
-import { verifyAdmin } from '@/lib/auth';
+import { verifyAuth, verifyAdmin } from '@/lib/auth';
 import { sanitizeUserCreation } from '@/lib/validation';
 import { handleImageUpload, validateContentType } from '@/lib/uploadMiddleware';
 
@@ -84,7 +84,16 @@ export async function POST(req: NextRequest) {
       : 'User created successfully';
 
     return NextResponse.json(
-      { message: successMessage, user: { id: newUser._id, email: newUser.email, role: newUser.role, status: newUser.status, profileImage: newUser.profileImage } },
+      { 
+        message: successMessage, 
+        user: { 
+          id: newUser._id, 
+          email: newUser.email, 
+          role: newUser.role, 
+          status: newUser.isArchived ? 'archived' : 'active', 
+          profileImage: newUser.profileImage 
+        } 
+      },
       { status: 201 }
     );
   } catch (error: unknown) {
@@ -95,9 +104,9 @@ export async function POST(req: NextRequest) {
 
 export async function GET(req: NextRequest) {
   try {
-    const adminCheck = await verifyAdmin(req);
-    if ('error' in adminCheck) {
-      return NextResponse.json({ message: adminCheck.error }, { status: adminCheck.status });
+    const auth = await verifyAuth(req);
+    if (auth.error) {
+      return NextResponse.json({ message: auth.error }, { status: auth.status });
     }
 
     await connectToDatabase();
@@ -113,7 +122,7 @@ export async function GET(req: NextRequest) {
     const roleFilter = searchParams.get('role') || '';
 
     // Build query
-    const query: any = {};
+    const query: Record<string, any> = {};
     if (search) {
       query.$or = [
         { firstName: { $regex: search, $options: 'i' } },
