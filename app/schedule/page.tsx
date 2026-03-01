@@ -10,9 +10,14 @@ import { useEffect, useState } from 'react';
 interface Schedule {
   _id: string;
   staff: {
-    firstName: string;
-    lastName: string;
-    email: string;
+    designation?: string;
+    status?: string;
+    user?: {
+      firstName: string;
+      lastName: string;
+      email: string;
+      role: string;
+    } | string;
   };
   startTime: string;
   endTime: string;
@@ -37,6 +42,9 @@ export default function SchedulePage() {
   const [validationError, setValidationError] = useState<string | null>(null);
   const [timeGapError, setTimeGapError] = useState<string | null>(null);
   const [conflictError, setConflictError] = useState<string | null>(null);
+  const [sortBy, setSortBy] = useState<'date' | 'type' | 'staff' | 'status'>('date');
+  const [filterScheduleType, setFilterScheduleType] = useState<'all' | 'recurring' | 'oneoff'>('all');
+  const [filterPublished, setFilterPublished] = useState<'all' | 'published' | 'draft'>('all');
   const [formData, setFormData] = useState({
     staff: '',
     startTime: '',
@@ -51,7 +59,41 @@ export default function SchedulePage() {
   });
   const [staff, setStaff] = useState([]);
 
-  // Helper function to check for scheduling conflicts
+  // Helper function to sort and filter schedules
+  const getSortedAndFilteredSchedules = () => {
+    let filtered = schedules;
+
+    // Apply schedule type filter
+    if (filterScheduleType === 'recurring') {
+      filtered = filtered.filter(s => !s.isOneOff);
+    } else if (filterScheduleType === 'oneoff') {
+      filtered = filtered.filter(s => s.isOneOff);
+    }
+
+    // Apply published filter
+    if (filterPublished === 'published') {
+      filtered = filtered.filter(s => s.isPublished);
+    } else if (filterPublished === 'draft') {
+      filtered = filtered.filter(s => !s.isPublished);
+    }
+
+    // Apply sorting
+    const sorted = [...filtered].sort((a, b) => {
+      switch (sortBy) {
+        case 'type':
+          return a.isOneOff === b.isOneOff ? 0 : a.isOneOff ? 1 : -1;
+        case 'staff':
+          return `${a.staff.firstName} ${a.staff.lastName}`.localeCompare(`${b.staff.firstName} ${b.staff.lastName}`);
+        case 'status':
+          return a.isPublished === b.isPublished ? 0 : a.isPublished ? -1 : 1;
+        case 'date':
+        default:
+          return new Date(b.startTime).getTime() - new Date(a.startTime).getTime();
+      }
+    });
+
+    return sorted;
+  };
   const checkSchedulingConflicts = (selectedStaffId: string, isOneOff: boolean, workDays: string[], oneOffDate: string) => {
     // Get relevant schedules for the selected staff member
     const staffSchedules = schedules.filter(s => s.staff._id === selectedStaffId || s.staff === selectedStaffId);
@@ -499,7 +541,7 @@ export default function SchedulePage() {
               </p>
             </div>
 
-            {(user?.role === 'staff' || user?.role === 'admin' || user?.role === 'manager') && (
+            {(user?.role === 'staff' || user?.role === 'admin') && (
               <button
                 type="button"
                 onClick={() => setShowCreateForm(!showCreateForm)}
@@ -508,6 +550,11 @@ export default function SchedulePage() {
                 <Plus className="h-4 w-4 mr-2" />
                 Create Schedule
               </button>
+            )}
+            {user?.role === 'manager' && (
+              <div className="mt-4 sm:mt-0 text-sm text-amber-600 bg-amber-50 px-4 py-2 rounded-md">
+                Managers can view but cannot create schedules
+              </div>
             )}
           </div>
         </div>
@@ -851,6 +898,52 @@ export default function SchedulePage() {
 
         {/* Schedules List */}
         <div className="bg-white rounded-lg shadow overflow-hidden">
+          {/* Filter and Sort Controls for Admin/Manager */}
+          {(user?.role === 'admin' || user?.role === 'manager') && (
+            <div className="p-4 bg-gray-50 border-b border-gray-200 grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Sort By</label>
+                <select
+                  value={sortBy}
+                  onChange={(e) => setSortBy(e.target.value as 'date' | 'type' | 'staff' | 'status')}
+                  className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                >
+                  <option value="date">Date (Newest First)</option>
+                  <option value="type">Schedule Type</option>
+                  <option value="staff">Staff Name</option>
+                  <option value="status">Published Status</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Schedule Type</label>
+                <select
+                  value={filterScheduleType}
+                  onChange={(e) => setFilterScheduleType(e.target.value as 'all' | 'recurring' | 'oneoff')}
+                  className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                >
+                  <option value="all">All Schedules</option>
+                  <option value="recurring">Recurring Only</option>
+                  <option value="oneoff">One-off Only</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Published Status</label>
+                <select
+                  value={filterPublished}
+                  onChange={(e) => setFilterPublished(e.target.value as 'all' | 'published' | 'draft')}
+                  className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                >
+                  <option value="all">All Statuses</option>
+                  <option value="published">Published</option>
+                  <option value="draft">Draft</option>
+                </select>
+              </div>
+            </div>
+          )}
+
+          {/* Schedules Display */}
           {loading ? (
             <div className="p-12 text-center">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600 mx-auto mb-4"></div>
@@ -864,7 +957,7 @@ export default function SchedulePage() {
             </div>
           ) : (
             <div className="divide-y divide-gray-200">
-              {schedules.map((schedule: Schedule) => (
+              {getSortedAndFilteredSchedules().map((schedule: Schedule) => (
                 <div
                   key={schedule._id}
                   className="p-6 border-b border-gray-200 last:border-b-0 hover:bg-gray-50/50 transition-colors"
@@ -872,6 +965,23 @@ export default function SchedulePage() {
                   <div className="flex items-start justify-between">
                     <div className="flex-1">
                       <div className="flex flex-col mb-2">
+                        {/* Staff Info Header for Admin/Manager */}
+                        {(user?.role === 'admin' || user?.role === 'manager') && schedule.staff && (
+                          <div className="mb-3 pb-3 border-b border-gray-200">
+                            <div className="text-sm font-bold text-gray-900">
+                              {typeof schedule.staff.user === 'object' && 'firstName' in schedule.staff.user
+                                ? `${(schedule.staff.user as any).firstName} ${(schedule.staff.user as any).lastName}`
+                                : 'Staff Member'}
+                            </div>
+                            {schedule.staff.designation && (
+                              <div className="text-xs text-gray-600 font-medium">{schedule.staff.designation}</div>
+                            )}
+                            {typeof schedule.staff.user === 'object' && 'role' in schedule.staff.user && (
+                              <div className="text-xs text-gray-500 capitalize">Role: {(schedule.staff.user as any).role}</div>
+                            )}
+                          </div>
+                        )}
+
                         <div className="flex items-center text-sm font-semibold text-gray-900">
                           {schedule.isOneOff ? (
                             <div className="flex items-center text-indigo-600 bg-indigo-50 px-2.5 py-1 rounded-lg">
@@ -896,12 +1006,6 @@ export default function SchedulePage() {
                             {schedule.timezone}
                           </div>
                         </div>
-
-                        {(user?.role === 'admin' || user?.role === 'manager') && schedule.staff && (
-                          <div className="mt-2 text-xs text-gray-400">
-                            Assigned to: {schedule.staff.firstName} {schedule.staff.lastName}
-                          </div>
-                        )}
                       </div>
 
                       <div className="flex items-center space-x-2 mt-4">

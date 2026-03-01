@@ -88,7 +88,14 @@ export async function GET(request: NextRequest) {
     }
 
     const schedules = await Schedule.find(filter)
-      .populate("staff", "firstName lastName email")
+      .populate({
+        path: "staff",
+        select: "designation status user",
+        populate: {
+          path: "user",
+          select: "firstName lastName email role",
+        },
+      })
       .sort({ startTime: -1 })
       .skip(skip)
       .limit(limit);
@@ -192,9 +199,21 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Only staff and admins can create schedules
+    if (user.role === "manager") {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            "Managers cannot create schedules. Only staff and admins can create schedules.",
+        },
+        { status: 403 },
+      );
+    }
+
     // Determine which staff member this schedule is for
     let staffToSchedulesFor;
-    if (user.role === "admin" || user.role === "manager") {
+    if (user.role === "admin") {
       if (!targetUserId) {
         return NextResponse.json(
           { success: false, error: "Staff member is required" },

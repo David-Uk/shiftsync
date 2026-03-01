@@ -1,15 +1,24 @@
 # ShiftSync
 
-A comprehensive Next.js application for shift scheduling and management with user authentication, role-based access control, and modern UI/UX design.
+A comprehensive Next.js application for shift scheduling and management with user authentication, role-based access control, timezone-aware scheduling, and modern UI/UX design.
 
 ## Features
 
 - **Authentication System**: Complete login/logout with JWT tokens
 - **Password Management**: Forgot password and reset functionality
 - **Role-based Access Control**: Admin, Manager, and Staff roles
-- **User Management**: Admin-only user creation and profile management
+- **User Management**: Admin-only user creation and profile management with staff record auto-creation
 - **Profile Management**: Image upload with Cloudinary integration
-- **Shift Scheduling**: Advanced shift management with timezone support
+- **Advanced Shift Scheduling**:
+  - Timezone-aware scheduling across different timezones
+  - Recurring and one-off schedule support
+  - Conflict detection between recurring and one-off schedules
+  - 10-hour rest rule validation
+  - Schedule publishing system
+- **Staff Management**: Automatic staff record creation for staff/manager roles
+- **Location Management**: Multiple location support
+- **Time Entry Management**: Clock-in/clock-out functionality
+- **Notification System**: Real-time notifications for schedule changes
 - **Input Validation**: Comprehensive sanitization and validation
 - **Responsive Design**: Mobile-first, accessible UI with Tailwind CSS
 - **Security Features**: Password hashing, JWT authentication, CSRF protection
@@ -22,7 +31,7 @@ Create a `.env` file in root directory with the following variables:
 
 ```env
 # Database Configuration
-MONGO_URL=mongodb://localhost:27017/shiftsync
+MONGODB_URL=mongodb://localhost:27017/shiftsync
 
 # JWT Configuration
 JWT_SECRET=your-super-secret-jwt-key-here
@@ -64,6 +73,7 @@ npm run dev
 - **First Admin**: Can be created without authentication (bootstrap)
 - **Subsequent Users**: Only authenticated admins can create users
 - **Roles**: Admin, Manager, Staff (first user must be admin)
+- **Staff Records**: Automatically created for staff and manager roles
 
 ### Authentication Pages
 
@@ -158,6 +168,13 @@ Get all users (admin only).
 Authorization: Bearer <admin_jwt_token>
 ```
 
+**Query Parameters:**
+
+- `page` (optional): Page number (default: 1)
+- `limit` (optional): Items per page (default: 10)
+- `search` (optional): Search term for name/email
+- `role` (optional): Filter by role (admin/manager/staff)
+
 **Response:**
 
 ```json
@@ -174,7 +191,13 @@ Authorization: Bearer <admin_jwt_token>
       "createdAt": "2024-01-01T00:00:00.000Z",
       "updatedAt": "2024-01-01T00:00:00.000Z"
     }
-  ]
+  ],
+  "pagination": {
+    "page": 1,
+    "limit": 10,
+    "total": 25,
+    "pages": 3
+  }
 }
 ```
 
@@ -196,7 +219,8 @@ Authorization: Bearer <admin_jwt_token>
   "lastName": "Doe",
   "email": "john.doe@example.com",
   "password": "SecurePassword123",
-  "role": "staff"
+  "role": "staff",
+  "designation": "bartender"
 }
 ```
 
@@ -208,6 +232,7 @@ lastName: Doe
 email: john.doe@example.com
 password: SecurePassword123
 role: staff
+designation: bartender
 profileImage: [file]
 ```
 
@@ -242,7 +267,8 @@ Authorization: Bearer <admin_jwt_token>
   "firstName": "John Updated",
   "lastName": "Doe Updated",
   "email": "john.updated@example.com",
-  "role": "manager"
+  "role": "manager",
+  "designation": "line cook"
 }
 ```
 
@@ -290,34 +316,331 @@ Authorization: Bearer <admin_jwt_token>
 }
 ```
 
-### Shift Management
+### Staff Management
 
-#### `GET /api/shifts`
+#### `GET /api/staff`
 
-Get all shift schedules (admin/manager access).
+Get all staff members (admin/manager access).
 
-#### `POST /api/shifts`
+**Headers:**
 
-Create new shift schedule (admin/manager access).
+```
+Authorization: Bearer <jwt_token>
+```
+
+**Response:**
+
+```json
+{
+  "staff": [
+    {
+      "id": "staff_id",
+      "user": {
+        "id": "user_id",
+        "firstName": "John",
+        "lastName": "Doe",
+        "email": "john@example.com"
+      },
+      "designation": "bartender",
+      "status": "active",
+      "createdAt": "2024-01-01T00:00:00.000Z"
+    }
+  ]
+}
+```
+
+#### `POST /api/staff`
+
+Add user to staff (admin only).
+
+**Headers:**
+
+```
+Authorization: Bearer <admin_jwt_token>
+```
 
 **Request:**
 
 ```json
 {
-  "location": "location_id",
-  "manager": "manager_id",
-  "title": "Morning Shift",
-  "description": "Early morning shift",
+  "userId": "user_id",
+  "designation": "bartender",
+  "status": "active"
+}
+```
+
+#### `PUT /api/staff/[id]`
+
+Update staff member (admin only).
+
+**Headers:**
+
+```
+Authorization: Bearer <admin_jwt_token>
+```
+
+**Request:**
+
+```json
+{
+  "designation": "line cook",
+  "status": "active"
+}
+```
+
+### Schedule Management
+
+#### `GET /api/schedules`
+
+Get schedules (role-based access).
+
+**Headers:**
+
+```
+Authorization: Bearer <jwt_token>
+```
+
+**Query Parameters:**
+
+- `page` (optional): Page number (default: 1)
+- `limit` (optional): Items per page (default: 10)
+- `startDate` (optional): Filter by start date
+- `endDate` (optional): Filter by end date
+- `timezone` (optional): Convert to local timezone
+- `staffId` (optional): Filter by staff member (admin/manager only)
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "schedules": [
+    {
+      "_id": "schedule_id",
+      "staff": {
+        "_id": "staff_id",
+        "firstName": "John",
+        "lastName": "Doe",
+        "email": "john@example.com"
+      },
+      "startTime": "2024-01-01T08:00:00.000Z",
+      "endTime": "2024-01-01T16:00:00.000Z",
+      "workDays": ["Monday", "Wednesday", "Friday"],
+      "isOneOff": false,
+      "timezone": "EST",
+      "notes": "Morning shift",
+      "isPublished": true,
+      "createdAt": "2024-01-01T00:00:00.000Z"
+    }
+  ],
+  "pagination": {
+    "page": 1,
+    "limit": 10,
+    "total": 25,
+    "pages": 3
+  }
+}
+```
+
+#### `POST /api/schedules`
+
+Create new schedule (admin/manager access, or staff for themselves).
+
+**Headers:**
+
+```
+Authorization: Bearer <jwt_token>
+```
+
+**Request:**
+
+```json
+{
+  "staff": "staff_id_or_user_id",
   "startTime": "2024-01-01T08:00:00.000Z",
   "endTime": "2024-01-01T16:00:00.000Z",
   "workDays": ["Monday", "Wednesday", "Friday"],
+  "isOneOff": false,
   "timezone": "EST",
-  "requiredSkills": ["Customer Service", "Cash Handling"],
-  "headcount": 3,
-  "assignedStaff": ["staff_id_1", "staff_id_2"],
-  "startDate": "2024-01-01T00:00:00.000Z",
-  "endDate": "2024-12-31T23:59:59.999Z"
+  "notes": "Morning shift"
 }
+```
+
+**Request (One-off schedule):**
+
+```json
+{
+  "staff": "staff_id_or_user_id",
+  "startTime": "2024-01-01T08:00:00.000Z",
+  "endTime": "2024-01-01T16:00:00.000Z",
+  "isOneOff": true,
+  "oneOffDate": "2024-01-01",
+  "timezone": "EST",
+  "notes": "Special event shift"
+}
+```
+
+#### `GET /api/schedules/[id]`
+
+Get single schedule.
+
+**Headers:**
+
+```
+Authorization: Bearer <jwt_token>
+```
+
+#### `PUT /api/schedules/[id]`
+
+Update schedule.
+
+**Headers:**
+
+```
+Authorization: Bearer <jwt_token>
+```
+
+#### `DELETE /api/schedules/[id]`
+
+Delete schedule.
+
+**Headers:**
+
+```
+Authorization: Bearer <jwt_token>
+```
+
+#### `PUT /api/schedules/[id]/publish`
+
+Publish schedule (make it visible to staff).
+
+**Headers:**
+
+```
+Authorization: Bearer <jwt_token>
+```
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "message": "Schedule published successfully",
+  "schedule": {
+    "_id": "schedule_id",
+    "isPublished": true
+    // ... other schedule fields
+  }
+}
+```
+
+### Time Entry Management
+
+#### `POST /api/time-entries/clock-in`
+
+Clock in for a shift.
+
+**Headers:**
+
+```
+Authorization: Bearer <jwt_token>
+```
+
+**Request:**
+
+```json
+{
+  "notes": "Starting morning shift"
+}
+```
+
+#### `POST /api/time-entries/clock-out`
+
+Clock out from a shift.
+
+**Headers:**
+
+```
+Authorization: Bearer <jwt_token>
+```
+
+**Request:**
+
+```json
+{
+  "notes": "Completed morning shift"
+}
+```
+
+#### `GET /api/my-shifts`
+
+Get current user's shifts.
+
+**Headers:**
+
+```
+Authorization: Bearer <jwt_token>
+```
+
+**Query Parameters:**
+
+- `page` (optional): Page number (default: 1)
+- `limit` (optional): Items per page (default: 10)
+- `startDate` (optional): Filter by start date
+- `endDate` (optional): Filter by end date
+- `timezone` (optional): Convert to local timezone
+
+### Location Management
+
+#### `GET /api/locations`
+
+Get all locations.
+
+**Headers:**
+
+```
+Authorization: Bearer <jwt_token>
+```
+
+#### `POST /api/locations`
+
+Create new location (admin only).
+
+**Headers:**
+
+```
+Authorization: Bearer <admin_jwt_token>
+```
+
+**Request:**
+
+```json
+{
+  "name": "Main Restaurant",
+  "address": "123 Main St, City, State",
+  "timezone": "EST",
+  "capacity": 100
+}
+```
+
+#### `PUT /api/locations/[id]`
+
+Update location (admin only).
+
+**Headers:**
+
+```
+Authorization: Bearer <admin_jwt_token>
+```
+
+#### `DELETE /api/locations/[id]`
+
+Delete location (admin only).
+
+**Headers:**
+
+```
+Authorization: Bearer <admin_jwt_token>
 ```
 
 ## Database Models
@@ -331,7 +654,9 @@ interface IUser {
   email: string;
   password?: string;
   role: "admin" | "manager" | "staff";
+  designation?: string; // Required for staff role
   profileImage?: string;
+  phone?: string;
   isArchived: boolean;
   passwordResetToken?: string;
   passwordResetExpiry?: Date;
@@ -340,28 +665,79 @@ interface IUser {
 }
 ```
 
-### ShiftSchedule Model
+### Staff Model
 
 ```typescript
-interface IShiftSchedule {
-  location: ObjectId; // Reference to Location
-  manager: ObjectId; // Reference to User (manager)
-  title: string;
-  description?: string;
-  startTime: Date; // UTC
-  endTime: Date; // UTC
-  workDays: string[]; // ['Sunday', 'Monday', ...]
-  timezone: string; // 'UTC', 'GMT', 'EST', 'PST', etc.
-  requiredSkills: string[];
-  headcount: number;
-  assignedStaff: ObjectId[]; // Reference to Staff
-  isActive: boolean;
-  startDate: Date;
-  endDate?: Date;
+interface IStaff {
+  user: ObjectId; // Reference to User
+  designation: string;
+  status:
+    | "active"
+    | "inactive"
+    | "on_leave"
+    | "suspended"
+    | "retrenched"
+    | "resigned"
+    | "retired";
   createdAt: Date;
   updatedAt: Date;
 }
 ```
+
+### Schedule Model
+
+```typescript
+interface ISchedule {
+  staff: ObjectId; // Reference to Staff
+  startTime: Date; // UTC
+  endTime: Date; // UTC
+  workDays: string[]; // ['Sunday', 'Monday', ...]
+  isOneOff: boolean;
+  oneOffDate?: Date;
+  timezone: string; // 'UTC', 'GMT', 'EST', 'PST', etc.
+  location?: ObjectId; // Reference to Location
+  notes?: string;
+  isPublished: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}
+```
+
+### Location Model
+
+```typescript
+interface ILocation {
+  name: string;
+  address: string;
+  timezone: string;
+  capacity?: number;
+  isActive: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}
+```
+
+## Scheduling Features
+
+### Timezone Support
+
+- All schedules stored in UTC
+- Automatic timezone conversion for display
+- Conflict detection across different timezones
+- 10-hour rest rule respected across timezone boundaries
+
+### Conflict Detection
+
+- **Recurring vs Recurring**: Prevents duplicate work days
+- **One-off vs One-off**: Prevents overlapping shifts on same date
+- **Recurring vs One-off**: Prevents one-off shifts on recurring work days
+- **Timezone-aware**: All conflicts detected regardless of timezone
+
+### Schedule Publishing
+
+- Draft schedules (isPublished: false) - only visible to managers/admins
+- Published schedules (isPublished: true) - visible to all staff
+- Automatic notifications when schedules are published
 
 ## Security Features
 
@@ -387,8 +763,8 @@ interface IShiftSchedule {
 
 ## Technology Stack
 
-- **Frontend**: Next.js 16, React 19, TypeScript
-- **Styling**: Tailwind CSS 4
+- **Frontend**: Next.js 15+, React, TypeScript
+- **Styling**: Tailwind CSS
 - **Backend**: Next.js API Routes
 - **Database**: MongoDB with Mongoose
 - **Authentication**: JWT with bcrypt
@@ -400,11 +776,11 @@ interface IShiftSchedule {
 
 All API endpoints include comprehensive error handling:
 
-- **400**: Bad Request (validation errors, missing fields)
+- **400**: Bad Request (validation errors, missing fields, scheduling conflicts)
 - **401**: Unauthorized (no token, invalid token)
 - **403**: Forbidden (insufficient permissions)
 - **404**: Not Found (resource doesn't exist)
-- **409**: Conflict (duplicate resources)
+- **409**: Conflict (duplicate resources, scheduling conflicts)
 - **500**: Internal Server Error
 
 ## Development
