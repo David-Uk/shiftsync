@@ -10,15 +10,32 @@ import { useEffect, useState } from 'react';
 
 interface Shift {
   _id: string;
+  title: string;
+  description?: string;
   startTime: string;
   endTime: string;
   location: {
     _id: string;
     address: string;
     city: string;
+    timezone?: string;
   };
-  role: string;
-  status: string;
+  manager: {
+    _id: string;
+    firstName: string;
+    lastName: string;
+    email: string;
+  };
+  workDays: string[];
+  timezone: string;
+  requiredSkills: string[];
+  headcount: number;
+  assignedStaff: string[];
+  isActive: boolean;
+  startDate: string;
+  endDate?: string;
+  status?: string;
+  role?: string;
   notes?: string;
 }
 
@@ -55,7 +72,7 @@ export default function MyShiftsPage() {
 
         if (response.ok) {
           const data = await response.json();
-          setShifts(data.shifts || []);
+          setShifts(data.data || []);
         } else {
           const errorData = await response.json().catch(() => ({}));
           throw new Error(errorData.message || 'Failed to fetch shifts');

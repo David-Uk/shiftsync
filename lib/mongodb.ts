@@ -4,7 +4,7 @@ const MONGO_URL = process.env.MONGODB_URL!;
 
 if (!MONGO_URL) {
   throw new Error(
-    "Please define theMONGO_URL environment variable inside .env",
+    "Please define the MONGO_URL environment variable inside .env",
   );
 }
 
