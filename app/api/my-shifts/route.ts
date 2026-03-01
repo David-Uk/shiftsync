@@ -16,7 +16,7 @@ async function getAuthenticatedUser(request: NextRequest) {
     const token = authHeader.substring(7);
     const decoded = jwt.verify(token, process.env.JWT_SECRET!) as { userId: string };
     
-    await mongoose.connect(process.env.MONGODB)URL!);
+    await mongoose.connect(process.env.MONGO_URL!);
     const user = await User.findById(decoded.userId);
     
     if (!user || (user.role !== 'admin' && user.role !== 'manager' && user.role !== 'staff')) {
@@ -40,7 +40,7 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    await mongoose.connect(process.env.MONGODB)URL!);
+    await mongoose.connect(process.env.MONGO_URL!);
     
     const { searchParams } = new URL(request.url);
     const page = parseInt(searchParams.get('page') || '1');

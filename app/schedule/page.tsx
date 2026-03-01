@@ -1,11 +1,11 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import DashboardLayout from '@/components/DashboardLayout';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/contexts/ToastContext';
-import DashboardLayout from '@/components/DashboardLayout';
-import { Calendar, Users, Plus, Edit, Trash2, Clock, Globe } from 'lucide-react';
+import { Calendar, Clock, Edit, Globe, Plus, Trash2, Users } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { useEffect, useState } from 'react';
 
 interface Schedule {
   _id: string;
@@ -27,7 +27,7 @@ interface Schedule {
 
 export default function SchedulePage() {
   const { user, isAuthenticated } = useAuth();
-  const { showError } = useToast();
+  const { showError, showSuccess } = useToast();
   const router = useRouter();
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [loading, setLoading] = useState(true);
@@ -36,6 +36,7 @@ export default function SchedulePage() {
   const [currentStep, setCurrentStep] = useState(1);
   const [validationError, setValidationError] = useState<string | null>(null);
   const [timeGapError, setTimeGapError] = useState<string | null>(null);
+  const [conflictError, setConflictError] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     staff: '',
     startTime: '',
@@ -49,6 +50,45 @@ export default function SchedulePage() {
     notes: ''
   });
   const [staff, setStaff] = useState([]);
+
+  // Helper function to check for scheduling conflicts
+  const checkSchedulingConflicts = (selectedStaffId: string, isOneOff: boolean, workDays: string[], oneOffDate: string) => {
+    // Get relevant schedules for the selected staff member
+    const staffSchedules = schedules.filter(s => s.staff._id === selectedStaffId || s.staff === selectedStaffId);
+
+    setConflictError(null);
+
+    if (isOneOff && oneOffDate) {
+      // Check if one-off date conflicts with recurring work days
+      const dateObj = new Date(oneOffDate);
+      const dayOfWeek = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][dateObj.getDay()];
+
+      const conflictingSchedule = staffSchedules.find(schedule =>
+        !schedule.isOneOff && schedule.workDays.includes(dayOfWeek)
+      );
+
+      if (conflictingSchedule) {
+        setConflictError(`The date ${new Date(oneOffDate).toLocaleDateString()} falls on a ${dayOfWeek} which is already scheduled as a recurring work day.`);
+      }
+    } else if (!isOneOff && workDays.length > 0) {
+      // Check for duplicate recurring work days
+      const duplicateDays: string[] = [];
+
+      for (const newDay of workDays) {
+        for (const existingSchedule of staffSchedules) {
+          if (!existingSchedule.isOneOff && existingSchedule.workDays.includes(newDay)) {
+            if (!duplicateDays.includes(newDay)) {
+              duplicateDays.push(newDay);
+            }
+          }
+        }
+      }
+
+      if (duplicateDays.length > 0) {
+        setConflictError(`The following days are already scheduled: ${duplicateDays.join(', ')}`);
+      }
+    }
+  };
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -153,6 +193,7 @@ export default function SchedulePage() {
     if (validateStep(currentStep, true)) {
       setCurrentStep(currentStep + 1);
       setValidationError(null);
+      setConflictError(null);
     }
   };
 
@@ -160,6 +201,7 @@ export default function SchedulePage() {
     if (currentStep > 1) {
       setCurrentStep(currentStep - 1);
       setValidationError(null);
+      setConflictError(null);
     }
   };
 
@@ -179,6 +221,7 @@ export default function SchedulePage() {
     });
     setValidationError(null);
     setTimeGapError(null);
+    setConflictError(null);
     setShowCreateForm(false);
   };
 
@@ -240,11 +283,23 @@ export default function SchedulePage() {
           if (!dateValid && showToast) {
             showError('Please select a date for the one-off schedule');
           }
+          if (dateValid && conflictError) {
+            if (showToast) {
+              showError(conflictError);
+            }
+            return false;
+          }
           return dateValid;
         } else {
           const workDaysValid = formData.workDays.length > 0;
           if (!workDaysValid && showToast) {
             showError('Please select at least one work day');
+          }
+          if (workDaysValid && conflictError) {
+            if (showToast) {
+              showError(conflictError);
+            }
+            return false;
           }
           return workDaysValid;
         }
@@ -350,6 +405,11 @@ export default function SchedulePage() {
 
     try {
       const token = localStorage.getItem('token');
+      if (!token) {
+        showError('Authentication token not found. Please log in again.');
+        return;
+      }
+
       const response = await fetch(`/api/schedules/${scheduleId}/publish`, {
         method: 'PUT',
         headers: {
@@ -358,8 +418,12 @@ export default function SchedulePage() {
         },
       });
 
+      console.log('Publish response status:', response.status);
+      const data = await response.json();
+      console.log('Publish response data:', data);
+
       if (response.ok) {
-        // Update the local state
+        // Update the local state immediately for better UX
         setSchedules(prev =>
           prev.map(schedule =>
             schedule._id === scheduleId
@@ -367,13 +431,15 @@ export default function SchedulePage() {
               : schedule
           )
         );
+        showSuccess('Schedule published successfully');
       } else {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.message || errorData.error || 'Failed to publish schedule');
+        const errorMessage = data.message || data.error || 'Failed to publish schedule';
+        console.error('Publish error:', errorMessage);
+        showError(errorMessage);
       }
     } catch (error) {
       console.error('Error publishing schedule:', error);
-      alert(error instanceof Error ? error.message : 'Failed to publish schedule');
+      showError(error instanceof Error ? error.message : 'Failed to publish schedule');
     }
   };
 
@@ -490,7 +556,10 @@ export default function SchedulePage() {
                           ) : (
                             <select
                               value={formData.staff}
-                              onChange={(e) => setFormData(prev => ({ ...prev, staff: e.target.value }))}
+                              onChange={(e) => {
+                                setFormData(prev => ({ ...prev, staff: e.target.value }));
+                                setConflictError(null);
+                              }}
                               className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all duration-200 outline-none text-sm"
                               required
                             >
@@ -581,7 +650,10 @@ export default function SchedulePage() {
                       <div className="flex space-x-4 mb-6">
                         <button
                           type="button"
-                          onClick={() => setFormData(prev => ({ ...prev, isOneOff: false, oneOffDate: '' }))}
+                          onClick={() => {
+                            setFormData(prev => ({ ...prev, isOneOff: false, oneOffDate: '' }));
+                            setConflictError(null);
+                          }}
                           className={`flex-1 p-4 rounded-xl border-2 transition-all duration-200 text-center ${!formData.isOneOff
                             ? 'border-indigo-600 bg-indigo-50 text-indigo-700'
                             : 'border-gray-100 bg-gray-50 text-gray-500 hover:border-gray-200'}`}
@@ -591,7 +663,10 @@ export default function SchedulePage() {
                         </button>
                         <button
                           type="button"
-                          onClick={() => setFormData(prev => ({ ...prev, isOneOff: true, workDays: [] }))}
+                          onClick={() => {
+                            setFormData(prev => ({ ...prev, isOneOff: true, workDays: [] }));
+                            setConflictError(null);
+                          }}
                           className={`flex-1 p-4 rounded-xl border-2 transition-all duration-200 text-center ${formData.isOneOff
                             ? 'border-indigo-600 bg-indigo-50 text-indigo-700'
                             : 'border-gray-100 bg-gray-50 text-gray-500 hover:border-gray-200'}`}
@@ -611,11 +686,15 @@ export default function SchedulePage() {
                                   type="checkbox"
                                   checked={formData.workDays.includes(day)}
                                   onChange={(e) => {
+                                    let newWorkDays;
                                     if (e.target.checked) {
-                                      setFormData(prev => ({ ...prev, workDays: [...prev.workDays, day] }));
+                                      newWorkDays = [...formData.workDays, day];
                                     } else {
-                                      setFormData(prev => ({ ...prev, workDays: prev.workDays.filter(d => d !== day) }));
+                                      newWorkDays = formData.workDays.filter(d => d !== day);
                                     }
+                                    setFormData(prev => ({ ...prev, workDays: newWorkDays }));
+                                    const staffId = user?.role === 'staff' ? (user._id || user.id) : formData.staff;
+                                    checkSchedulingConflicts(staffId, false, newWorkDays, '');
                                   }}
                                   className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
                                 />
@@ -630,10 +709,26 @@ export default function SchedulePage() {
                           <input
                             type="date"
                             value={formData.oneOffDate}
-                            onChange={(e) => setFormData(prev => ({ ...prev, oneOffDate: e.target.value }))}
+                            onChange={(e) => {
+                              setFormData(prev => ({ ...prev, oneOffDate: e.target.value }));
+                              const staffId = user?.role === 'staff' ? (user._id || user.id) : formData.staff;
+                              checkSchedulingConflicts(staffId, true, [], e.target.value);
+                            }}
                             className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all duration-200 outline-none text-sm"
                           />
                           <p className="mt-2 text-xs text-gray-500 italic">This schedule will only apply to the selected date.</p>
+                        </div>
+                      )}
+
+                      {/* Conflict Error Message */}
+                      {conflictError && currentStep === 2 && (
+                        <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-xl">
+                          <p className="text-sm text-red-600 flex items-center">
+                            <svg className="w-4 h-4 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                            </svg>
+                            {conflictError}
+                          </p>
                         </div>
                       )}
                     </div>
@@ -823,17 +918,16 @@ export default function SchedulePage() {
                     </div>
 
                     <div className="flex space-x-2">
+                      {!schedule.isPublished && (user?.role === 'staff' || user?.role === 'manager' || user?.role === 'admin') && (
+                        <button
+                          onClick={() => handlePublishSchedule(schedule._id)}
+                          className="bg-green-600 text-white px-3 py-1 rounded-md hover:bg-green-700 text-sm"
+                        >
+                          Publish
+                        </button>
+                      )}
                       {user?.role === 'staff' && (
                         <>
-                          {!schedule.isPublished && (
-                            <button
-                              onClick={() => handlePublishSchedule(schedule._id)}
-                              className="bg-green-600 text-white px-3 py-1 rounded-md hover:bg-green-700 text-sm"
-                            >
-                              Publish
-                            </button>
-                          )}
-
                           <button
                             onClick={() => router.push(`/schedules/${schedule._id}/edit`)}
                             className="bg-indigo-600 text-white px-3 py-1 rounded-md hover:bg-indigo-700 text-sm"

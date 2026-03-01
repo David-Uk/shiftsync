@@ -236,7 +236,7 @@ ScheduleSchema.pre('save', async function(this: ISchedule) {
               const checkDateInRecTz = convertToTimezone(checkDate, recurring.timezone);
               const dayName = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][checkDateInRecTz.getDay()];
               
-              if (other.workDays && other.workDays.includes(dayName)) {
+              if (recurring.workDays && recurring.workDays.includes(dayName)) {
                 // Construct virtual Date for the recurring shift on that specific day in recurring's timezone
                 const recStart = new Date(checkDateInRecTz);
                 recStart.setHours(other.startTime.getHours(), other.startTime.getMinutes(), 0, 0);

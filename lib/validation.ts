@@ -122,6 +122,7 @@ export function sanitizeUserCreation(data: {
   password: string;
   role: string;
   profileImage?: string;
+  designation?: string;
 }) {
   return {
     firstName: sanitizeName(data.firstName),
@@ -130,6 +131,7 @@ export function sanitizeUserCreation(data: {
     password: sanitizePassword(data.password),
     role: sanitizeRole(data.role),
     profileImage: data.profileImage ? sanitizeString(data.profileImage) : undefined,
+    designation: data.designation ? sanitizeDesignation(data.designation) : undefined,
   };
 }
 
