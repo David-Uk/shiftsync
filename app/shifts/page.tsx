@@ -1,11 +1,12 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import DashboardLayout from '@/components/DashboardLayout';
+import ShiftScheduleModal from '@/components/ShiftScheduleModal';
 import { useAuth } from '@/contexts/AuthContext';
 import { useNotifications } from '@/contexts/NotificationContext';
-import DashboardLayout from '@/components/DashboardLayout';
-import { Calendar, Clock, MapPin, Search } from 'lucide-react';
+import { Calendar, Clock, MapPin, Plus, Search } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { useEffect, useState } from 'react';
 
 interface Shift {
   _id: string;
@@ -29,6 +30,7 @@ export default function MyShiftsPage() {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('upcoming');
   const [searchTerm, setSearchTerm] = useState('');
+  const [showShiftModal, setShowShiftModal] = useState(false);
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -113,6 +115,17 @@ export default function MyShiftsPage() {
               <h1 className="text-2xl font-bold text-gray-900">My Shifts</h1>
               <p className="text-gray-600 mt-1">Manage and view your assigned work shifts</p>
             </div>
+
+            {user?.role === 'manager' && (
+              <button
+                type="button"
+                onClick={() => setShowShiftModal(true)}
+                className="mt-4 sm:mt-0 sm:ml-4 bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700 flex items-center"
+              >
+                <Plus className="h-4 w-4 mr-2" />
+                Add Shift
+              </button>
+            )}
 
             <div className="mt-4 sm:mt-0 sm:ml-4">
               <div className="flex space-x-4">
@@ -223,6 +236,17 @@ export default function MyShiftsPage() {
           )}
         </div>
       </div>
+
+      {/* Shift Schedule Modal */}
+      <ShiftScheduleModal
+        isOpen={showShiftModal}
+        onClose={() => setShowShiftModal(false)}
+        onSuccess={() => {
+          // Refresh shifts when a new shift is created
+          setLoading(true);
+        }}
+      />
     </DashboardLayout>
   );
 }
+

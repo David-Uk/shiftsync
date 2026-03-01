@@ -1,10 +1,10 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useAuth } from '@/contexts/AuthContext';
 import { Bell, Menu, Search, User } from 'lucide-react';
 import Image from 'next/image';
-import { useAuth } from '@/contexts/AuthContext';
+import { useRouter } from 'next/navigation';
+import { useEffect, useState } from 'react';
 
 interface DashboardNavbarProps {
   onMenuToggle: () => void;
@@ -35,7 +35,7 @@ export function DashboardNavbar({ onMenuToggle, sidebarOpen }: DashboardNavbarPr
     const date = new Date(dateString);
     const now = new Date();
     const diffInSeconds = Math.floor((now.getTime() - date.getTime()) / 1000);
-    
+
     if (diffInSeconds < 60) return 'Just now';
     if (diffInSeconds < 3600) return `${Math.floor(diffInSeconds / 60)}m ago`;
     if (diffInSeconds < 86400) return `${Math.floor(diffInSeconds / 3600)}h ago`;
@@ -77,7 +77,7 @@ export function DashboardNavbar({ onMenuToggle, sidebarOpen }: DashboardNavbarPr
     eventSource.onmessage = (event) => {
       try {
         const payload = JSON.parse(event.data);
-        
+
         if (payload.type === 'notifications') {
           // Update notifications list with new data
           setNotifications(prev => {
@@ -109,7 +109,7 @@ export function DashboardNavbar({ onMenuToggle, sidebarOpen }: DashboardNavbarPr
     try {
       const token = localStorage.getItem('token');
       const url = id ? `/api/notifications/read?id=${id}` : '/api/notifications/read';
-      
+
       const response = await fetch(url, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` }
@@ -135,7 +135,7 @@ export function DashboardNavbar({ onMenuToggle, sidebarOpen }: DashboardNavbarPr
   };
 
   return (
-    <header className="bg-white/80 backdrop-blur-md shadow-sm border-b border-gray-100 shrink-0 sticky top-0 z-50 transition-all duration-300">
+    <header className="bg-white/80 backdrop-blur-md shadow-sm border-b border-gray-100 shrink-0 sticky top-0 z-20 transition-all duration-300">
       <div className="px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-center h-20">
           {/* Left side - Menu button and search */}
@@ -185,7 +185,7 @@ export function DashboardNavbar({ onMenuToggle, sidebarOpen }: DashboardNavbarPr
 
               {/* Notifications dropdown */}
               {showNotifications && (
-                <div className="fixed right-4 mt-2 w-80 bg-white rounded-lg shadow-lg ring-1 ring-black ring-opacity-5 z-50">
+                <div className="fixed right-4 mt-2 w-80 bg-white rounded-lg shadow-lg ring-1 ring-black ring-opacity-5 z-30">
                   <div className="p-4 border-b border-gray-200">
                     <h3 className="text-sm font-medium text-gray-900">Notifications</h3>
                   </div>
@@ -266,7 +266,7 @@ export function DashboardNavbar({ onMenuToggle, sidebarOpen }: DashboardNavbarPr
 
               {/* User dropdown */}
               {showUserMenu && (
-                <div className="absolute right-0 mt-3 w-56 bg-white/95 backdrop-blur-xl rounded-2xl shadow-2xl ring-1 ring-black/5 z-50 overflow-hidden transform opacity-100 scale-100 transition-all duration-200">
+                <div className="absolute right-0 mt-3 w-56 bg-white/95 backdrop-blur-xl rounded-2xl shadow-2xl ring-1 ring-black/5 z-30 overflow-hidden transform opacity-100 scale-100 transition-all duration-200">
                   <div className="p-4 bg-gray-50/50 border-b border-gray-100">
                     <p className="text-sm font-medium text-gray-900">
                       {user?.firstName} {user?.lastName}

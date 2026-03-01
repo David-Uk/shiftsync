@@ -1,6 +1,7 @@
 'use client';
 
 import DashboardLayout from '@/components/DashboardLayout';
+import ShiftScheduleModal from '@/components/ShiftScheduleModal';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/contexts/ToastContext';
 import { Calendar, Clock, Edit, Globe, Plus, Trash2, Users } from 'lucide-react';
@@ -37,6 +38,7 @@ export default function SchedulePage() {
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreateForm, setShowCreateForm] = useState(false);
+  const [showShiftModal, setShowShiftModal] = useState(false);
   const [formLoading, setFormLoading] = useState(false);
   const [currentStep, setCurrentStep] = useState(1);
   const [validationError, setValidationError] = useState<string | null>(null);
@@ -552,9 +554,14 @@ export default function SchedulePage() {
               </button>
             )}
             {user?.role === 'manager' && (
-              <div className="mt-4 sm:mt-0 text-sm text-amber-600 bg-amber-50 px-4 py-2 rounded-md">
-                Managers can view but cannot create schedules
-              </div>
+              <button
+                type="button"
+                onClick={() => setShowShiftModal(true)}
+                className="mt-4 sm:mt-0 sm:ml-4 bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700 flex items-center"
+              >
+                <Plus className="h-4 w-4 mr-2" />
+                Add Shift
+              </button>
             )}
           </div>
         </div>
@@ -1056,6 +1063,16 @@ export default function SchedulePage() {
             </div>
           )}
         </div>
+
+        {/* Shift Schedule Modal */}
+        <ShiftScheduleModal
+          isOpen={showShiftModal}
+          onClose={() => setShowShiftModal(false)}
+          onSuccess={() => {
+            // Refresh schedules when a new shift is created
+            setLoading(true);
+          }}
+        />
       </div>
     </DashboardLayout>
   );
