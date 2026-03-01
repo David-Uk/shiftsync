@@ -60,50 +60,50 @@ export default function LocationsPage() {
   });
   const [formLoading, setFormLoading] = useState(false);
 
+  const fetchLocations = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const params = new URLSearchParams({
+        search: searchTerm
+      });
+
+      // Add manager filter if user is a manager
+      if (user?.role === 'manager') {
+        params.append('managerId', user._id || user.id);
+      }
+
+      const response = await fetch(`/api/locations?${params}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setLocations(data.data || []);
+      } else {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.message || 'Failed to fetch locations');
+      }
+    } catch (error) {
+      console.error('Error fetching locations:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    await fetchLocations();
+    setRefreshing(false);
+  };
+
   useEffect(() => {
     if (!isAuthenticated) {
       router.push('/auth/login');
       return;
     }
-
-    const handleRefresh = async () => {
-      setRefreshing(true);
-      await fetchLocations();
-      setRefreshing(false);
-    };
-
-    const fetchLocations = async () => {
-      try {
-        const token = localStorage.getItem('token');
-        const params = new URLSearchParams({
-          search: searchTerm
-        });
-
-        // Add manager filter if user is a manager
-        if (user?.role === 'manager') {
-          params.append('managerId', user._id || user.id);
-        }
-
-        const response = await fetch(`/api/locations?${params}`, {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          },
-        });
-
-        if (response.ok) {
-          const data = await response.json();
-          setLocations(data.data || []);
-        } else {
-          const errorData = await response.json().catch(() => ({}));
-          throw new Error(errorData.message || 'Failed to fetch locations');
-        }
-      } catch (error) {
-        console.error('Error fetching locations:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
 
     const fetchManagers = async () => {
       try {
@@ -504,7 +504,7 @@ export default function LocationsPage() {
                         <h3 className="text-lg font-semibold text-gray-900 mb-1">{location.address}</h3>
                         <p className="text-sm text-gray-600">{location.city}</p>
                         <p className="text-xs text-gray-500">Timezone: {location.timezone}</p>
-                        <p className="text-xs text-indigo-600 font-medium mt-1">{calculateTimeSpan(location.createdAt, location.updatedAt)}</p>
+                        <p className="text-xs text-indigo-600 font-medium mt-1">{calculateTimeSpan(location.createdAt)}</p>
                       </div>
 
                       <div className="space-y-3">

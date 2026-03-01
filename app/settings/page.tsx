@@ -101,13 +101,16 @@ export default function SettingsPage() {
     if (field.includes('.')) {
       // Handle nested object properties (notifications)
       const [parent, child] = field.split('.');
-      setSettings(prev => ({
-        ...prev!,
-        [parent]: {
-          ...prev![parent as keyof UserSettings],
-          [child]: value
-        }
-      }));
+      setSettings(prev => {
+        const parentValue = prev![parent as keyof UserSettings];
+        return {
+          ...prev!,
+          [parent]: {
+            ...(typeof parentValue === 'object' ? parentValue : {}),
+            [child]: value
+          }
+        };
+      });
     } else {
       setSettings(prev => ({
         ...prev!,
@@ -137,7 +140,7 @@ export default function SettingsPage() {
               <h1 className="text-2xl font-bold text-gray-900">Settings</h1>
               <p className="text-gray-600 mt-1">Manage your account preferences</p>
             </div>
-            
+
             <button
               onClick={handleSaveSettings}
               disabled={saving || !settings}
@@ -161,35 +164,32 @@ export default function SettingsPage() {
               <nav className="-mb-px flex space-x-8">
                 <button
                   onClick={() => setActiveTab('profile')}
-                  className={`py-4 px-1 border-b-2 font-medium text-sm ${
-                    activeTab === 'profile'
-                      ? 'border-indigo-500 text-indigo-600'
-                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                  }`}
+                  className={`py-4 px-1 border-b-2 font-medium text-sm ${activeTab === 'profile'
+                    ? 'border-indigo-500 text-indigo-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                    }`}
                 >
                   <User className="h-5 w-5 inline-block mr-2" />
                   Profile
                 </button>
-                
+
                 <button
                   onClick={() => setActiveTab('notifications')}
-                  className={`py-4 px-1 border-b-2 font-medium text-sm ${
-                    activeTab === 'notifications'
-                      ? 'border-indigo-500 text-indigo-600'
-                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                  }`}
+                  className={`py-4 px-1 border-b-2 font-medium text-sm ${activeTab === 'notifications'
+                    ? 'border-indigo-500 text-indigo-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                    }`}
                 >
                   <Bell className="h-5 w-5 inline-block mr-2" />
                   Notifications
                 </button>
-                
+
                 <button
                   onClick={() => setActiveTab('preferences')}
-                  className={`py-4 px-1 border-b-2 font-medium text-sm ${
-                    activeTab === 'preferences'
-                      ? 'border-indigo-500 text-indigo-600'
-                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                  }`}
+                  className={`py-4 px-1 border-b-2 font-medium text-sm ${activeTab === 'preferences'
+                    ? 'border-indigo-500 text-indigo-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                    }`}
                 >
                   <Globe className="h-5 w-5 inline-block mr-2" />
                   Preferences
@@ -214,7 +214,7 @@ export default function SettingsPage() {
                           className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
                         />
                       </div>
-                      
+
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">Last Name</label>
                         <input
@@ -236,7 +236,7 @@ export default function SettingsPage() {
                           className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
                         />
                       </div>
-                      
+
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">Phone</label>
                         <input
@@ -263,13 +263,11 @@ export default function SettingsPage() {
                       </div>
                       <button
                         onClick={() => handleInputChange('notifications.email', !settings.notifications.email)}
-                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                          settings.notifications.email ? 'bg-indigo-600' : 'bg-gray-200'
-                        }`}
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${settings.notifications.email ? 'bg-indigo-600' : 'bg-gray-200'
+                          }`}
                       >
-                        <span className={`inline-block h-4 w-4 rounded-full bg-white transition-transform ${
-                          settings.notifications.email ? 'translate-x-6' : 'translate-x-1'
-                        }`} />
+                        <span className={`inline-block h-4 w-4 rounded-full bg-white transition-transform ${settings.notifications.email ? 'translate-x-6' : 'translate-x-1'
+                          }`} />
                       </button>
                     </div>
 
@@ -280,13 +278,11 @@ export default function SettingsPage() {
                       </div>
                       <button
                         onClick={() => handleInputChange('notifications.push', !settings.notifications.push)}
-                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                          settings.notifications.push ? 'bg-indigo-600' : 'bg-gray-200'
-                        }`}
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${settings.notifications.push ? 'bg-indigo-600' : 'bg-gray-200'
+                          }`}
                       >
-                        <span className={`inline-block h-4 w-4 rounded-full bg-white transition-transform ${
-                          settings.notifications.push ? 'translate-x-6' : 'translate-x-1'
-                        }`} />
+                        <span className={`inline-block h-4 w-4 rounded-full bg-white transition-transform ${settings.notifications.push ? 'translate-x-6' : 'translate-x-1'
+                          }`} />
                       </button>
                     </div>
 
@@ -297,13 +293,11 @@ export default function SettingsPage() {
                       </div>
                       <button
                         onClick={() => handleInputChange('notifications.shiftReminders', !settings.notifications.shiftReminders)}
-                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                          settings.notifications.shiftReminders ? 'bg-indigo-600' : 'bg-gray-200'
-                        }`}
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${settings.notifications.shiftReminders ? 'bg-indigo-600' : 'bg-gray-200'
+                          }`}
                       >
-                        <span className={`inline-block h-4 w-4 rounded-full bg-white transition-transform ${
-                          settings.notifications.shiftReminders ? 'translate-x-6' : 'translate-x-1'
-                        }`} />
+                        <span className={`inline-block h-4 w-4 rounded-full bg-white transition-transform ${settings.notifications.shiftReminders ? 'translate-x-6' : 'translate-x-1'
+                          }`} />
                       </button>
                     </div>
 
@@ -314,13 +308,11 @@ export default function SettingsPage() {
                       </div>
                       <button
                         onClick={() => handleInputChange('notifications.scheduleChanges', !settings.notifications.scheduleChanges)}
-                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                          settings.notifications.scheduleChanges ? 'bg-indigo-600' : 'bg-gray-200'
-                        }`}
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${settings.notifications.scheduleChanges ? 'bg-indigo-600' : 'bg-gray-200'
+                          }`}
                       >
-                        <span className={`inline-block h-4 w-4 rounded-full bg-white transition-transform ${
-                          settings.notifications.scheduleChanges ? 'translate-x-6' : 'translate-x-1'
-                        }`} />
+                        <span className={`inline-block h-4 w-4 rounded-full bg-white transition-transform ${settings.notifications.scheduleChanges ? 'translate-x-6' : 'translate-x-1'
+                          }`} />
                       </button>
                     </div>
                   </div>

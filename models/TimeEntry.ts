@@ -15,6 +15,11 @@ export interface ITimeEntry extends Document {
   updatedAt: Date;
 }
 
+export interface ITimeEntryStatics {
+  toLocalTime(utcDate: Date, timezone: string): Date;
+  toUTC(localDate: Date, timezone: string): Date;
+}
+
 const TimeEntrySchema: Schema<ITimeEntry> = new Schema(
   {
     staff: { 
@@ -194,16 +199,14 @@ TimeEntrySchema.statics.toUTC = function(localDate: Date, timezone: string): Dat
 
 // Instance method to get time entry in local timezone
 TimeEntrySchema.methods.toLocalTimeEntry = function(this: ITimeEntry): Record<string, unknown> {
-  const staticMethods = this.constructor as {
-    toLocalTime: (utcDate: Date, timezone: string) => Date;
-  };
+  const model = (this.constructor as unknown) as Model<ITimeEntry> & ITimeEntryStatics;
   return {
     ...this.toObject(),
-    clockIn: staticMethods.toLocalTime(this.clockIn, this.timezone),
-    clockOut: this.clockOut ? staticMethods.toLocalTime(this.clockOut, this.timezone) : undefined,
+    clockIn: model.toLocalTime(this.clockIn, this.timezone),
+    clockOut: this.clockOut ? model.toLocalTime(this.clockOut, this.timezone) : undefined,
   };
 };
 
-const TimeEntry: Model<ITimeEntry> = mongoose.models.TimeEntry || mongoose.model<ITimeEntry>('TimeEntry', TimeEntrySchema);
+const TimeEntry: Model<ITimeEntry> & ITimeEntryStatics = (mongoose.models.TimeEntry as Model<ITimeEntry> & ITimeEntryStatics) || mongoose.model<ITimeEntry>('TimeEntry', TimeEntrySchema);
 
 export default TimeEntry;

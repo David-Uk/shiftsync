@@ -100,6 +100,16 @@ export default function ShiftScheduleModal({
     }, [token]);
 
     const fetchAvailableStaff = useCallback(async () => {
+        console.log('fetchAvailableStaff called with:', {
+            location: formData.location,
+            startTime: formData.startTime,
+            startAmPm: formData.startAmPm,
+            endTime: formData.endTime,
+            endAmPm: formData.endAmPm,
+            workDays: formData.workDays,
+            designation: formData.designation
+        });
+
         setAvailableStaffLoading(true);
         try {
             const startTime24 = convertTo24Hour(formData.startTime, formData.startAmPm);
@@ -109,16 +119,44 @@ export default function ShiftScheduleModal({
                 location: formData.location,
                 startTime: startTime24,
                 endTime: endTime24,
-                workDays: formData.workDays.join(',')
+                workDays: formData.workDays.join(','),
+                designation: formData.designation
             });
+
+            console.log('Making request to:', `/api/staff/available?${params}`);
+            console.log('Token being sent:', token ? 'Present' : 'Missing');
+            console.log('Token length:', token?.length || 0);
+
+            // Test JWT endpoint first
+            try {
+                const testResponse = await fetch('/api/test-jwt', {
+                    headers: {
+                        Authorization: `Bearer ${token}`
+                    }
+                });
+                const testData = await testResponse.json();
+                console.log('JWT Test Response:', testData);
+            } catch (testError) {
+                console.error('JWT Test Error:', testError);
+            }
 
             const response = await fetch(`/api/staff/available?${params}`, {
                 headers: {
                     Authorization: `Bearer ${token}`
                 }
             });
-            if (!response.ok) throw new Error('Failed to fetch available staff');
+
+            console.log('Response status:', response.status);
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                console.error('Response error:', errorText);
+                throw new Error('Failed to fetch available staff');
+            }
+
             const data = await response.json();
+            console.log('Response data:', data);
+
             setAvailableStaff(data.data || []);
             setStaffAvailabilityCount(data.data?.length || 0);
         } catch (err) {
@@ -127,7 +165,7 @@ export default function ShiftScheduleModal({
         } finally {
             setAvailableStaffLoading(false);
         }
-    }, [token, formData.location, formData.startTime, formData.startAmPm, formData.endTime, formData.endAmPm, formData.workDays]);
+    }, [token, formData.location, formData.startTime, formData.startAmPm, formData.endTime, formData.endAmPm, formData.workDays, formData.designation]);
 
     // Fetch manager's locations
     useEffect(() => {
@@ -136,18 +174,18 @@ export default function ShiftScheduleModal({
         }
     }, [isOpen, user?.role, fetchLocations]);
 
-    // Fetch available staff when location, time, or work days change
+    // Fetch available staff when time, work days, or designation change
     useEffect(() => {
         if (
             currentStep >= 2 &&
-            formData.location &&
             formData.startTime &&
             formData.endTime &&
-            formData.workDays.length > 0
+            formData.workDays.length > 0 &&
+            formData.designation
         ) {
             fetchAvailableStaff();
         }
-    }, [currentStep, formData.location, formData.startTime, formData.endTime, formData.workDays, fetchAvailableStaff]);
+    }, [currentStep, formData.startTime, formData.endTime, formData.workDays, formData.designation, fetchAvailableStaff, token]);
 
     const handleLocationChange = (locationId: string) => {
         const selected = locations.find(l => l._id === locationId);
@@ -305,7 +343,7 @@ export default function ShiftScheduleModal({
     if (!isOpen) return null;
 
     return (
-        <div className="fixed inset-0 bg-gray-950/40 backdrop-blur-sm z-[9999] flex items-center justify-center p-4 transition-all duration-300">
+        <div className="fixed inset-0 bg-gray-950/40 backdrop-blur-sm z-[99999] flex items-center justify-center p-4 transition-all duration-300">
             <div className="bg-white rounded-2xl shadow-2xl border border-gray-100 max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col transform transition-all animate-in fade-in zoom-in duration-300">
                 {/* Header */}
                 <div className="flex items-center justify-between p-6 border-b border-gray-100 bg-gradient-to-r from-indigo-50 to-transparent">

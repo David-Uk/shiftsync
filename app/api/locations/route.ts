@@ -4,12 +4,13 @@ import User from '@/models/User';
 import { verifyAuth, verifyAdmin } from '@/lib/auth';
 import connectToDatabase from '@/lib/mongodb';
 import NotificationService from '@/lib/notificationService';
+import mongoose from 'mongoose';
 
 // GET unassigned managers
 export async function GET(request: NextRequest) {
   try {
     const auth = await verifyAuth(request);
-    if (auth.error) {
+    if ('error' in auth) {
       return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
     }
     await connectToDatabase();
@@ -139,7 +140,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const adminCheck = await verifyAdmin(request);
-    if (adminCheck.error) {
+    if ('error' in adminCheck) {
       return NextResponse.json({ success: false, error: adminCheck.error }, { status: adminCheck.status });
     }
     
@@ -147,7 +148,7 @@ export async function POST(request: NextRequest) {
     
     const body = await request.json();
     const { address, city, timezone, manager } = body;
-    const createdBy = adminCheck.user?._id;
+    const createdBy = adminCheck.user._id;
     
     // Validate required fields
     if (!address || !city || !timezone || !manager || !createdBy) {

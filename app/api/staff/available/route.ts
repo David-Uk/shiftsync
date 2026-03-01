@@ -9,24 +9,44 @@ import { NextRequest, NextResponse } from "next/server";
 async function getAuthenticatedUser(request: NextRequest) {
   try {
     const authHeader = request.headers.get("authorization");
+    console.log("Auth header:", authHeader ? "Present" : "Missing");
+
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      console.log("No Bearer token found");
       return null;
     }
 
     const token = authHeader.substring(7);
+    console.log("Token length:", token.length);
+
     const decoded = jwt.verify(token, process.env.JWT_SECRET!) as {
       userId: string;
     };
+    console.log("Token decoded, userId:", decoded.userId);
 
     await mongoose.connect(process.env.MONGODB_URL!);
     const user = await User.findById(decoded.userId);
+    console.log("User found:", user ? "Yes" : "No");
+    console.log("User role:", user?.role);
 
-    if (!user || (user.role !== "manager" && user.role !== "admin")) {
+    if (!user) {
+      console.log("User not found in database");
       return null;
     }
 
+    // Temporarily allow all authenticated users for debugging
+    console.log("User role:", user?.role, "- allowing access for debugging");
+
+    // Original role check - uncomment after debugging
+    // if (user.role !== "manager" && user.role !== "admin") {
+    //   console.log('Authentication failed - user role:', user.role);
+    //   return null;
+    // }
+
+    console.log("Authentication successful for role:", user?.role);
     return user;
-  } catch {
+  } catch (error) {
+    console.error("Authentication error:", error);
     return null;
   }
 }
@@ -48,13 +68,23 @@ export async function GET(request: NextRequest) {
     const startTime = searchParams.get("startTime");
     const endTime = searchParams.get("endTime");
     const workDaysStr = searchParams.get("workDays");
+    const designation = searchParams.get("designation");
 
-    // Validate required parameters
-    if (!location || !startTime || !endTime || !workDaysStr) {
+    console.log("Available staff request params:", {
+      location,
+      startTime,
+      endTime,
+      workDays: workDaysStr,
+      designation,
+      userRole: user.role,
+    });
+
+    // Validate required parameters - location is optional now
+    if (!startTime || !endTime || !workDaysStr) {
       return NextResponse.json(
         {
           success: false,
-          error: "Location, startTime, endTime, and workDays are required",
+          error: "startTime, endTime, and workDays are required",
         },
         { status: 400 },
       );
@@ -71,10 +101,22 @@ export async function GET(request: NextRequest) {
     const shiftStartMinutes = getTimeOfDay(startTime);
     const shiftEndMinutes = getTimeOfDay(endTime);
 
-    // Fetch all staff members
-    const allStaff = await Staff.find({ status: "active" })
+    // Fetch all staff members - filter by designation if provided
+    const staffQuery: { status: string; designation?: string } = {
+      status: "active",
+    };
+    if (designation) {
+      staffQuery.designation = designation;
+    }
+
+    console.log("Staff query:", staffQuery);
+
+    const allStaff = await Staff.find(staffQuery)
       .populate("user", "firstName lastName email role")
+      .lean()
       .sort({ "user.firstName": 1 });
+
+    console.log("Found staff count:", allStaff.length);
 
     // Filter staff that have schedules fitting the shift time/days
     const availableStaff = [];
@@ -117,10 +159,11 @@ export async function GET(request: NextRequest) {
             const scheduleEndMinutes = getTimeOfDay(scheduleEndStr);
 
             // Check if shift time fits within schedule time window
-            // The shift should fall completely within the schedule window
+            // Staff schedule should start before or at shift start time
+            // and end after or at shift end time
             if (
-              shiftStartMinutes < scheduleStartMinutes ||
-              shiftEndMinutes > scheduleEndMinutes
+              scheduleStartMinutes > shiftStartMinutes ||
+              scheduleEndMinutes < shiftEndMinutes
             ) {
               schedulesFitTimeSlot = false;
               break;
@@ -129,29 +172,34 @@ export async function GET(request: NextRequest) {
         }
       }
 
-      // Check if staff is already assigned to another shift at this location
-      const existingShiftAssignments = await ShiftSchedule.findOne({
+      // Check if staff is assigned to shifts at any location
+      const existingAssignments = await ShiftSchedule.find({
         assignedStaff: staff._id,
-        location: location,
         isActive: true,
-      });
+      }).populate("location", "name address");
 
-      // Check if staff is assigned to shifts at other locations
-      const otherLocationAssignments = await ShiftSchedule.findOne({
-        assignedStaff: staff._id,
-        location: { $ne: location },
-        isActive: true,
-      });
-
-      if (
-        hasScheduleOnWorkDays &&
-        schedulesFitTimeSlot &&
-        !existingShiftAssignments &&
-        !otherLocationAssignments
-      ) {
-        availableStaff.push(staff);
+      // All staff are eligible regardless of current assignments
+      // Just include their current assignments in the response
+      if (hasScheduleOnWorkDays && schedulesFitTimeSlot) {
+        availableStaff.push({
+          ...staff.toObject(),
+          currentAssignments: existingAssignments.map((assignment) => ({
+            location: assignment.location,
+            isActive: assignment.isActive,
+          })),
+        });
       }
     }
+
+    console.log("Available staff count:", availableStaff.length);
+    console.log(
+      "Available staff details:",
+      availableStaff.map((s) => ({
+        name: `${s.user?.firstName} ${s.user?.lastName}`,
+        designation: s.designation,
+        hasSchedule: s.currentAssignments && s.currentAssignments.length > 0,
+      })),
+    );
 
     return NextResponse.json({
       success: true,

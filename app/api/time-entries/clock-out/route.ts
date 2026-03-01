@@ -91,7 +91,8 @@ export async function POST(request: NextRequest) {
     let shouldMarkAsOvertime = activeEntry.isOvertime;
     
     if (activeEntry.schedule && !activeEntry.isOvertime) {
-      const scheduleDuration = Math.round((activeEntry.schedule.endTime.getTime() - activeEntry.schedule.startTime.getTime()) / (1000 * 60));
+      const schedule = activeEntry.schedule as unknown as { startTime: Date; endTime: Date; _id: mongoose.Types.ObjectId }; 
+      const scheduleDuration = Math.round((schedule.endTime.getTime() - schedule.startTime.getTime()) / (1000 * 60));
       
       // If worked more than 30 minutes over schedule duration, mark as overtime
       if (duration > scheduleDuration + 30) {

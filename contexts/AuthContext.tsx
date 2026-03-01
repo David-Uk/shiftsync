@@ -18,6 +18,7 @@ interface AuthContextType {
   token: string | null;
   login: (token: string, user: User) => void;
   logout: () => void;
+  updateProfile: (updatedUser: Partial<User>) => Promise<void>;
   isLoading: boolean;
   isAuthenticated: boolean;
 }
@@ -82,11 +83,42 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     router.push('/auth/login');
   };
 
+  const updateProfile = async (updatedUser: Partial<User>) => {
+    if (!user || !token) {
+      throw new Error('User not authenticated');
+    }
+
+    try {
+      const response = await fetch('/api/users/profile', {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(updatedUser),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to update profile');
+      }
+
+      const updatedUserData = await response.json();
+      const newUser = { ...user, ...updatedUserData };
+
+      setUser(newUser);
+      localStorage.setItem('user', JSON.stringify(newUser));
+    } catch (error) {
+      console.error('Error updating profile:', error);
+      throw error;
+    }
+  };
+
   const value: AuthContextType = {
     user,
     token,
     login,
     logout,
+    updateProfile,
     isLoading,
     isAuthenticated: isLoading ? true : (!!token && !!user),
   };

@@ -21,10 +21,7 @@ async function getAuthenticatedUser(request: NextRequest) {
     await mongoose.connect(process.env.MONGODB_URL!);
     const user = await User.findById(decoded.userId);
 
-    if (
-      !user ||
-      (user.role !== "admin" && user.role !== "manager" && user.role !== "user")
-    ) {
+    if (!user || !["admin", "manager", "user"].includes(user.role)) {
       return null;
     }
 
@@ -61,7 +58,6 @@ export async function GET(request: NextRequest) {
     const limit = parseInt(searchParams.get("limit") || "10");
     const startDate = searchParams.get("startDate");
     const endDate = searchParams.get("endDate");
-    const timezone = searchParams.get("timezone");
     const activeOnly = searchParams.get("activeOnly") === "true";
 
     const skip = (page - 1) * limit;
@@ -96,9 +92,7 @@ export async function GET(request: NextRequest) {
       .limit(limit);
 
     // Convert to local timezone if requested
-    const processedEntries = timezone
-      ? timeEntries.map((entry) => entry.toLocalTimeEntry())
-      : timeEntries;
+    const processedEntries = timeEntries;
 
     const total = await TimeEntry.countDocuments(filter);
 
@@ -117,9 +111,7 @@ export async function GET(request: NextRequest) {
           activeEntry: activeEntry
             ? {
                 ...activeEntry.toObject(),
-                clockIn: timezone
-                  ? activeEntry.toLocalTimeEntry().clockIn
-                  : activeEntry.clockIn,
+                clockIn: activeEntry.clockIn,
               }
             : null,
         },

@@ -85,7 +85,14 @@ export default function SchedulePage() {
         case 'type':
           return a.isOneOff === b.isOneOff ? 0 : a.isOneOff ? 1 : -1;
         case 'staff':
-          return `${a.staff.firstName} ${a.staff.lastName}`.localeCompare(`${b.staff.firstName} ${b.staff.lastName}`);
+          const getStaffName = (staff: Schedule['staff']) => {
+            if (typeof staff === 'string') return staff;
+            if (staff.user && typeof staff.user === 'object') {
+              return `${staff.user.firstName} ${staff.user.lastName}`;
+            }
+            return 'Unknown Staff';
+          };
+          return getStaffName(a.staff).localeCompare(getStaffName(b.staff));
         case 'status':
           return a.isPublished === b.isPublished ? 0 : a.isPublished ? -1 : 1;
         case 'date':
@@ -98,7 +105,10 @@ export default function SchedulePage() {
   };
   const checkSchedulingConflicts = (selectedStaffId: string, isOneOff: boolean, workDays: string[], oneOffDate: string) => {
     // Get relevant schedules for the selected staff member
-    const staffSchedules = schedules.filter(s => s.staff._id === selectedStaffId || s.staff === selectedStaffId);
+    const staffSchedules = schedules.filter(s =>
+      (typeof s.staff === 'string' && s.staff === selectedStaffId) ||
+      (s.staff.user && typeof s.staff.user === 'object' && `${s.staff.user.firstName} ${s.staff.user.lastName}` === selectedStaffId)
+    );
 
     setConflictError(null);
 
