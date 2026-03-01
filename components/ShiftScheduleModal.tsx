@@ -19,6 +19,20 @@ interface AvailableStaff {
         lastName: string;
     };
     designation: string;
+    status?: "available" | "conflict" | "schedule_mismatch";
+    reason?: string;
+    conflictingAssignments?: Array<{
+        locationName: string;
+        startTime: string;
+        endTime: string;
+        workDays: string[];
+    }>;
+    currentAssignments?: Array<{
+        location: { name?: string; address?: string };
+        startTime: Date;
+        endTime: Date;
+        workDays: string[];
+    }>;
 }
 
 interface ShiftScheduleModalProps {
@@ -39,6 +53,7 @@ export default function ShiftScheduleModal({
     const [locations, setLocations] = useState<Location[]>([]);
     const [locationsLoading, setLocationsLoading] = useState(false);
     const [availableStaff, setAvailableStaff] = useState<AvailableStaff[]>([]);
+    const [unavailableStaff, setUnavailableStaff] = useState<AvailableStaff[]>([]);
     const [availableStaffLoading, setAvailableStaffLoading] = useState(false);
     const [staffAvailabilityCount, setStaffAvailabilityCount] = useState(0);
     const [error, setError] = useState<string | null>(null);
@@ -157,8 +172,9 @@ export default function ShiftScheduleModal({
             const data = await response.json();
             console.log('Response data:', data);
 
-            setAvailableStaff(data.data || []);
-            setStaffAvailabilityCount(data.data?.length || 0);
+            setAvailableStaff(data.data?.available || []);
+            setUnavailableStaff(data.data?.unavailable || []);
+            setStaffAvailabilityCount(data.count?.available || 0);
         } catch (err) {
             console.error('Error fetching available staff:', err);
             setError('Failed to load available staff');
@@ -582,10 +598,29 @@ export default function ShiftScheduleModal({
                                 </div>
                             )}
                             {!availableStaffLoading && staffAvailabilityCount > 0 && (
-                                <div className="p-4 bg-green-50 rounded-lg border border-green-200">
-                                    <p className="text-sm text-green-700 font-medium">
-                                        ✓ {staffAvailabilityCount} staff member{staffAvailabilityCount !== 1 ? 's' : ''} available for this shift
-                                    </p>
+                                <div className="space-y-2">
+                                    <div className="p-4 bg-green-50 rounded-lg border border-green-200">
+                                        <p className="text-sm text-green-700 font-medium">
+                                            ✓ {staffAvailabilityCount} staff member{staffAvailabilityCount !== 1 ? 's' : ''} available for this shift
+                                        </p>
+                                    </div>
+                                    {unavailableStaff.length > 0 && (
+                                        <div className="p-3 bg-amber-50 rounded-lg border border-amber-200">
+                                            <p className="text-xs text-amber-700 font-medium">
+                                                ⚠️ {unavailableStaff.length} staff member{unavailableStaff.length !== 1 ? 's' : ''} unavailable:
+                                            </p>
+                                            <ul className="mt-2 space-y-1">
+                                                {unavailableStaff.slice(0, 3).map((staff, idx) => (
+                                                    <li key={idx} className="text-xs text-amber-600">
+                                                        • {staff.user.firstName} {staff.user.lastName}: {staff.reason}
+                                                    </li>
+                                                ))}
+                                                {unavailableStaff.length > 3 && (
+                                                    <li className="text-xs text-amber-600">and {unavailableStaff.length - 3} more...</li>
+                                                )}
+                                            </ul>
+                                        </div>
+                                    )}
                                 </div>
                             )}
                         </div>
@@ -603,31 +638,81 @@ export default function ShiftScheduleModal({
                                     <div className="flex items-center justify-center p-8">
                                         <Loader className="h-5 w-5 animate-spin text-indigo-600" />
                                     </div>
-                                ) : availableStaff.length === 0 ? (
+                                ) : availableStaff.length === 0 && unavailableStaff.length === 0 ? (
                                     <div className="p-4 bg-amber-50 rounded-lg border border-amber-200">
                                         <p className="text-sm text-amber-700">No staff available for the selected schedule. Please adjust your time slots or work days.</p>
                                     </div>
                                 ) : (
-                                    <div className="space-y-2 max-h-64 overflow-y-auto">
-                                        {availableStaff.map(staff => (
-                                            <label
-                                                key={staff._id}
-                                                className="flex items-center gap-3 p-3 rounded-lg border border-gray-200 hover:bg-indigo-50 cursor-pointer transition-colors"
-                                            >
-                                                <input
-                                                    type="checkbox"
-                                                    checked={formData.assignedStaff.includes(staff._id)}
-                                                    onChange={() => handleStaffToggle(staff._id)}
-                                                    className="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                                                />
-                                                <div className="flex-1">
-                                                    <p className="font-medium text-gray-900">
-                                                        {staff.user.firstName} {staff.user.lastName}
-                                                    </p>
-                                                    <p className="text-xs text-gray-600">{staff.designation}</p>
+                                    <div className="space-y-4">
+                                        {/* Available Staff Section */}
+                                        {availableStaff.length > 0 && (
+                                            <div>
+                                                <h3 className="text-xs font-semibold text-green-700 mb-3 flex items-center gap-2">
+                                                    <span className="w-2 h-2 bg-green-600 rounded-full"></span>
+                                                    Available Staff ({availableStaff.length})
+                                                </h3>
+                                                <div className="space-y-2 max-h-40 overflow-y-auto">
+                                                    {availableStaff.map(staff => (
+                                                        <label
+                                                            key={staff._id}
+                                                            className="flex items-start gap-3 p-3 rounded-lg border border-green-200 bg-green-50 hover:bg-green-100 cursor-pointer transition-colors"
+                                                        >
+                                                            <input
+                                                                type="checkbox"
+                                                                checked={formData.assignedStaff.includes(staff._id)}
+                                                                onChange={() => handleStaffToggle(staff._id)}
+                                                                className="w-4 h-4 rounded border-gray-300 text-green-600 focus:ring-green-500 mt-0.5"
+                                                            />
+                                                            <div className="flex-1 min-w-0">
+                                                                <p className="font-medium text-gray-900">
+                                                                    {staff.user.firstName} {staff.user.lastName}
+                                                                </p>
+                                                                <p className="text-xs text-gray-600">{staff.designation}</p>
+                                                            </div>
+                                                        </label>
+                                                    ))}
                                                 </div>
-                                            </label>
-                                        ))}
+                                            </div>
+                                        )}
+
+                                        {/* Unavailable Staff Section */}
+                                        {unavailableStaff.length > 0 && (
+                                            <div>
+                                                <h3 className="text-xs font-semibold text-amber-700 mb-3 flex items-center gap-2">
+                                                    <span className="w-2 h-2 bg-amber-600 rounded-full"></span>
+                                                    Unavailable Staff ({unavailableStaff.length})
+                                                </h3>
+                                                <div className="space-y-2 max-h-40 overflow-y-auto">
+                                                    {unavailableStaff.map(staff => (
+                                                        <div
+                                                            key={staff._id}
+                                                            className="flex items-start gap-3 p-3 rounded-lg border border-amber-200 bg-amber-50 opacity-60"
+                                                        >
+                                                            <div className="w-4 h-4 rounded border border-gray-300 bg-gray-100 mt-0.5"></div>
+                                                            <div className="flex-1 min-w-0">
+                                                                <p className="font-medium text-gray-700">
+                                                                    {staff.user.firstName} {staff.user.lastName}
+                                                                </p>
+                                                                <p className="text-xs text-gray-600 mb-1">{staff.designation}</p>
+                                                                <p className="text-xs text-amber-700 font-medium">
+                                                                    {staff.status === "conflict" ? "🚫 " : "⚠️ "}
+                                                                    {staff.reason}
+                                                                </p>
+                                                                {staff.conflictingAssignments && staff.conflictingAssignments.length > 0 && (
+                                                                    <div className="mt-1 text-xs text-amber-600">
+                                                                        {staff.conflictingAssignments.map((conflict, idx) => (
+                                                                            <p key={idx}>
+                                                                                • {conflict.locationName}: {conflict.startTime} - {conflict.endTime}
+                                                                            </p>
+                                                                        ))}
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
                                     </div>
                                 )}
                             </div>

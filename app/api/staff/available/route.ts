@@ -98,6 +98,17 @@ export async function GET(request: NextRequest) {
       return hours * 60 + minutes; // Convert to minutes for easier comparison
     };
 
+    // Helper function to check if two time ranges overlap
+    const timeRangesOverlap = (
+      start1: number,
+      end1: number,
+      start2: number,
+      end2: number,
+    ): boolean => {
+      // Two ranges overlap if one starts before the other ends
+      return start1 < end2 && start2 < end1;
+    };
+
     const shiftStartMinutes = getTimeOfDay(startTime);
     const shiftEndMinutes = getTimeOfDay(endTime);
 
@@ -120,9 +131,10 @@ export async function GET(request: NextRequest) {
 
     // Filter staff that have schedules fitting the shift time/days
     const availableStaff = [];
+    const unavailableStaff = [];
 
     for (const staff of allStaff) {
-      // Get staff's schedules
+      // Get staff's published schedules
       const staffSchedules = await Schedule.find({
         staff: staff._id,
         isPublished: true,
@@ -172,39 +184,104 @@ export async function GET(request: NextRequest) {
         }
       }
 
-      // Check if staff is assigned to shifts at any location
-      const existingAssignments = await ShiftSchedule.find({
+      // Check if staff is assigned to shifts at any location with overlapping times
+      const existingShiftAssignments = await ShiftSchedule.find({
         assignedStaff: staff._id,
         isActive: true,
+        location: { $ne: location }, // Different location
       }).populate("location", "name address");
 
-      // All staff are eligible regardless of current assignments
-      // Just include their current assignments in the response
-      if (hasScheduleOnWorkDays && schedulesFitTimeSlot) {
+      // Check for time conflicts with other location assignments
+      let hasTimeConflict = false;
+      const conflictingAssignments = [];
+
+      for (const assignment of existingShiftAssignments) {
+        // Check if any of the required work days overlap with assignment days
+        const dayOverlap = workDays.some((day) =>
+          assignment.workDays.includes(day),
+        );
+
+        if (dayOverlap) {
+          // Get assignment times
+          const assignmentStartStr =
+            assignment.startTime instanceof Date
+              ? assignment.startTime.toTimeString().slice(0, 5)
+              : String(assignment.startTime).padStart(5, "0");
+          const assignmentEndStr =
+            assignment.endTime instanceof Date
+              ? assignment.endTime.toTimeString().slice(0, 5)
+              : String(assignment.endTime).padStart(5, "0");
+
+          const assignmentStartMinutes = getTimeOfDay(assignmentStartStr);
+          const assignmentEndMinutes = getTimeOfDay(assignmentEndStr);
+
+          // Check if time ranges overlap
+          if (
+            timeRangesOverlap(
+              shiftStartMinutes,
+              shiftEndMinutes,
+              assignmentStartMinutes,
+              assignmentEndMinutes,
+            )
+          ) {
+            hasTimeConflict = true;
+            const locationData = assignment.location as any;
+            conflictingAssignments.push({
+              locationName:
+                locationData?.name || locationData?.address || "Unknown",
+              startTime: assignmentStartStr,
+              endTime: assignmentEndStr,
+              workDays: assignment.workDays,
+            });
+          }
+        }
+      }
+
+      // Only add to available if no conflicts and has required schedule
+      if (hasScheduleOnWorkDays && schedulesFitTimeSlot && !hasTimeConflict) {
         availableStaff.push({
-          ...staff.toObject(),
-          currentAssignments: existingAssignments.map((assignment) => ({
+          ...staff,
+          status: "available",
+          currentAssignments: existingShiftAssignments.map((assignment) => ({
             location: assignment.location,
-            isActive: assignment.isActive,
+            startTime: assignment.startTime,
+            endTime: assignment.endTime,
+            workDays: assignment.workDays,
+          })),
+        });
+      } else if (hasScheduleOnWorkDays) {
+        // Staff has valid schedule but is unavailable (not conflicting with other location)
+        unavailableStaff.push({
+          ...staff,
+          status: hasTimeConflict ? "conflict" : "schedule_mismatch",
+          reason: hasTimeConflict
+            ? "Assigned to another location with overlapping times"
+            : "Schedule doesn't match the required shift times",
+          conflictingAssignments,
+          currentAssignments: existingShiftAssignments.map((assignment) => ({
+            location: assignment.location,
+            startTime: assignment.startTime,
+            endTime: assignment.endTime,
+            workDays: assignment.workDays,
           })),
         });
       }
     }
 
     console.log("Available staff count:", availableStaff.length);
-    console.log(
-      "Available staff details:",
-      availableStaff.map((s) => ({
-        name: `${s.user?.firstName} ${s.user?.lastName}`,
-        designation: s.designation,
-        hasSchedule: s.currentAssignments && s.currentAssignments.length > 0,
-      })),
-    );
+    console.log("Available staff details count:", availableStaff.length);
+    console.log("Unavailable staff count:", unavailableStaff.length);
 
     return NextResponse.json({
       success: true,
-      data: availableStaff,
-      count: availableStaff.length,
+      data: {
+        available: availableStaff,
+        unavailable: unavailableStaff,
+      },
+      count: {
+        available: availableStaff.length,
+        unavailable: unavailableStaff.length,
+      },
     });
   } catch (error: unknown) {
     console.error("Error fetching available staff:", error);
