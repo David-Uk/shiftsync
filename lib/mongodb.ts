@@ -1,8 +1,8 @@
 import mongoose from "mongoose";
 
-constMONGO_URL = process.env.MONGODB_URL!;
+const MONGO_URL = process.env.MONGODB_URL!;
 
-if (!MONGODB_URL) {
+if (!MONGO_URL) {
   throw new Error(
     "Please define theMONGO_URL environment variable inside .env",
   );
@@ -28,7 +28,7 @@ async function connectToDatabase() {
       bufferCommands: false,
     };
 
-    cached.promise = mongoose.connect(MONGODB_URL, opts).then((mongoose) => {
+    cached.promise = mongoose.connect(MONGO_URL, opts).then((mongoose) => {
       return mongoose;
     });
   }
