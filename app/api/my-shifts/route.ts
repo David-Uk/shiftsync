@@ -1,25 +1,32 @@
-import { NextRequest, NextResponse } from 'next/server';
-import mongoose from 'mongoose';
-import ShiftSchedule from '@/models/ShiftSchedule';
-import Staff from '@/models/Staff';
-import User from '@/models/User';
-import jwt from 'jsonwebtoken';
+import connectToDatabase from "@/lib/mongodb";
+import ShiftSchedule from "@/models/ShiftSchedule";
+import Staff from "@/models/Staff";
+import User from "@/models/User";
+import jwt from "jsonwebtoken";
+import { NextRequest, NextResponse } from "next/server";
 
 // Helper function to verify JWT token and get user
 async function getAuthenticatedUser(request: NextRequest) {
   try {
-    const authHeader = request.headers.get('authorization');
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    const authHeader = request.headers.get("authorization");
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
       return null;
     }
 
     const token = authHeader.substring(7);
-    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as { userId: string };
-    
-    await mongoose.connect(process.env.MONGO_URL!);
+    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as {
+      userId: string;
+    };
+
+    await connectToDatabase();
     const user = await User.findById(decoded.userId);
-    
-    if (!user || (user.role !== 'admin' && user.role !== 'manager' && user.role !== 'staff')) {
+
+    if (
+      !user ||
+      (user.role !== "admin" &&
+        user.role !== "manager" &&
+        user.role !== "staff")
+    ) {
       return null;
     }
 
@@ -35,73 +42,77 @@ export async function GET(request: NextRequest) {
     const user = await getAuthenticatedUser(request);
     if (!user) {
       return NextResponse.json(
-        { success: false, error: 'Unauthorized' },
-        { status: 401 }
+        { success: false, error: "Unauthorized" },
+        { status: 401 },
       );
     }
 
-    await mongoose.connect(process.env.MONGO_URL!);
-    
+    await connectToDatabase();
+
     const { searchParams } = new URL(request.url);
-    const page = parseInt(searchParams.get('page') || '1');
-    const limit = parseInt(searchParams.get('limit') || '10');
-    const startDate = searchParams.get('startDate');
-    const endDate = searchParams.get('endDate');
-    const timezone = searchParams.get('timezone');
-    const activeOnly = searchParams.get('activeOnly') === 'true';
-    
+    const page = parseInt(searchParams.get("page") || "1");
+    const limit = parseInt(searchParams.get("limit") || "10");
+    const startDate = searchParams.get("startDate");
+    const endDate = searchParams.get("endDate");
+    const timezone = searchParams.get("timezone");
+    const activeOnly = searchParams.get("activeOnly") === "true";
+
     const skip = (page - 1) * limit;
-    
+
     // Get staff record for this user
     const staff = await Staff.findOne({ user: user._id });
     if (!staff) {
       return NextResponse.json(
-        { success: false, error: 'Staff record not found for this user' },
-        { status: 404 }
+        { success: false, error: "Staff record not found for this user" },
+        { status: 404 },
       );
     }
-    
+
     // Build filter for assigned shifts
     const filter: Record<string, unknown> = {
       assignedStaff: staff._id,
-      isActive: true
+      isActive: true,
     };
-    
+
     // Don't show expired schedules
     filter.$or = [
       { endDate: { $exists: false } },
-      { endDate: { $gte: new Date() } }
+      { endDate: { $gte: new Date() } },
     ];
-    
+
     if (startDate || endDate) {
       filter.startDate = {};
       if (startDate) {
-        (filter.startDate as Record<string, unknown>)['$gte'] = new Date(startDate);
+        (filter.startDate as Record<string, unknown>)["$gte"] = new Date(
+          startDate,
+        );
       }
       if (endDate) {
-        (filter.startDate as Record<string, unknown>)['$lte'] = new Date(endDate);
+        (filter.startDate as Record<string, unknown>)["$lte"] = new Date(
+          endDate,
+        );
       }
     }
-    
+
     if (activeOnly) {
       filter.startTime = { $lte: new Date() };
       filter.endTime = { $gte: new Date() };
     }
-    
+
     const shiftSchedules = await ShiftSchedule.find(filter)
-      .populate('location', 'address city timezone')
-      .populate('manager', 'firstName lastName email')
+      .populate("location", "address city timezone")
+      .populate("manager", "firstName lastName email")
       .sort({ startTime: 1 })
       .skip(skip)
       .limit(limit);
-    
+
     // Convert to local timezone if requested
-    const processedSchedules = timezone 
-      ? shiftSchedules.map(schedule => schedule.toLocalShiftSchedule())
+    const processedSchedules = timezone
+      ? shiftSchedules.map((schedule) => schedule.toLocalShiftSchedule())
       : shiftSchedules;
-    
+
     const total = await ShiftSchedule.countDocuments(filter);
-    
+
     return NextResponse.json({
       success: true,
       data: processedSchedules,
@@ -109,14 +120,14 @@ export async function GET(request: NextRequest) {
         page,
         limit,
         total,
-        pages: Math.ceil(total / limit)
-      }
+        pages: Math.ceil(total / limit),
+      },
     });
   } catch (error: unknown) {
-    console.error('Error fetching assigned shifts:', error);
+    console.error("Error fetching assigned shifts:", error);
     return NextResponse.json(
-      { success: false, error: 'Failed to fetch assigned shifts' },
-      { status: 500 }
+      { success: false, error: "Failed to fetch assigned shifts" },
+      { status: 500 },
     );
   }
 }

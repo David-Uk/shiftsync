@@ -1,3 +1,4 @@
+import connectToDatabase from "@/lib/mongodb";
 import NotificationService from "@/lib/notificationService";
 import Location from "@/models/Location";
 import ShiftSchedule from "@/models/ShiftSchedule";
@@ -20,7 +21,7 @@ async function getAuthenticatedUser(request: NextRequest) {
       userId: string;
     };
 
-    await mongoose.connect(process.env.MONGODB_URL!);
+    await connectToDatabase();
     const user = await User.findById(decoded.userId);
 
     if (!user || (user.role !== "admin" && user.role !== "manager")) {
@@ -53,7 +54,7 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    await mongoose.connect(process.env.MONGODB_URL!);
+    await connectToDatabase();
 
     const { searchParams } = new URL(request.url);
     const page = parseInt(searchParams.get("page") || "1");
@@ -145,7 +146,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    await mongoose.connect(process.env.MONGODB_URL!);
+    await connectToDatabase();
 
     const body = await request.json();
     const {

@@ -4,7 +4,7 @@ const MONGO_URL = process.env.MONGODB_URL!;
 
 if (!MONGO_URL) {
   throw new Error(
-    "Please define the MONGO_URL environment variable inside .env",
+    "Please define the MONGODB_URL environment variable inside .env",
   );
 }
 
@@ -32,14 +32,14 @@ async function connectToDatabase() {
       return mongoose;
     });
   }
-  
+
   try {
     cached.conn = await cached.promise;
   } catch (e) {
     cached.promise = null;
     throw e;
   }
-  
+
   return cached.conn;
 }
 

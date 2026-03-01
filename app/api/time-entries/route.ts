@@ -1,8 +1,8 @@
+import connectToDatabase from "@/lib/mongodb";
 import Staff from "@/models/Staff";
 import TimeEntry from "@/models/TimeEntry";
 import User from "@/models/User";
 import jwt from "jsonwebtoken";
-import mongoose from "mongoose";
 import { NextRequest, NextResponse } from "next/server";
 
 // Helper function to verify JWT token and get user
@@ -18,7 +18,7 @@ async function getAuthenticatedUser(request: NextRequest) {
       userId: string;
     };
 
-    await mongoose.connect(process.env.MONGODB_URL!);
+    await connectToDatabase();
     const user = await User.findById(decoded.userId);
 
     if (!user || !["admin", "manager", "user"].includes(user.role)) {
@@ -51,7 +51,7 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    await mongoose.connect(process.env.MONGODB_URL!);
+    await connectToDatabase();
 
     const { searchParams } = new URL(request.url);
     const page = parseInt(searchParams.get("page") || "1");

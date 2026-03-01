@@ -1,9 +1,9 @@
+import connectToDatabase from "@/lib/mongodb";
 import Schedule from "@/models/Schedule";
 import ShiftSchedule from "@/models/ShiftSchedule";
 import Staff from "@/models/Staff";
 import User from "@/models/User";
 import jwt from "jsonwebtoken";
-import mongoose from "mongoose";
 import { NextRequest, NextResponse } from "next/server";
 
 async function getAuthenticatedUser(request: NextRequest) {
@@ -24,7 +24,7 @@ async function getAuthenticatedUser(request: NextRequest) {
     };
     console.log("Token decoded, userId:", decoded.userId);
 
-    await mongoose.connect(process.env.MONGODB_URL!);
+    await connectToDatabase();
     const user = await User.findById(decoded.userId);
     console.log("User found:", user ? "Yes" : "No");
     console.log("User role:", user?.role);
@@ -61,7 +61,7 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    await mongoose.connect(process.env.MONGODB_URL!);
+    await connectToDatabase();
 
     const { searchParams } = new URL(request.url);
     const location = searchParams.get("location");
