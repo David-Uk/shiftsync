@@ -2,60 +2,47 @@ import { NextRequest, NextResponse } from 'next/server';
 import mongoose from 'mongoose';
 import Schedule from '@/models/Schedule';
 import Staff from '@/models/Staff';
-import jwt from 'jsonwebtoken';
 import User from '@/models/User';
 import { createNotificationForEvent } from '@/lib/notificationMiddleware';
-import NotificationService from '@/lib/notificationService';
-
-// Helper function to verify JWT token and get user
-async function getAuthenticatedUser(request: NextRequest) {
-  try {
-    const authHeader = request.headers.get('authorization');
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return null;
-    }
-
-    const token = authHeader.substring(7);
-    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as { userId: string };
-    
-    await mongoose.connect(process.env.MONGODB_URI!);
-    const user = await User.findById(decoded.userId);
-    
-    if (!user || (user.role !== 'admin' && user.role !== 'manager' && user.role !== 'staff')) {
-      return null;
-    }
-
-    return user;
-  } catch {
-    return null;
-  }
-}
+import connectToDatabase from '@/lib/mongodb';
+import { verifyAuth } from '@/lib/auth';
 
 // Helper function to get staff record for authenticated user
 async function getUserStaffRecord(userId: string) {
-  const staff = await Staff.findOne({ user: userId });
+  let staff = await Staff.findOne({ user: userId });
   if (!staff) {
-    throw new Error('Staff record not found for this user');
+    // Check if user exists and has a role that requires a staff record
+    const user = await User.findById(userId);
+    if (user && (user.role === 'staff' || user.role === 'manager')) {
+      staff = new Staff({
+        user: userId,
+        designation: user.designation || (user.role === 'manager' ? 'Manager' : 'Staff Member'),
+        status: 'active'
+      });
+      await staff.save();
+    } else {
+      throw new Error('Staff record not found for this user');
+    }
   }
   return staff;
 }
 
-// GET schedule by ID for authenticated staff
+// GET a single schedule
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id } = await params;
-    const user = await getAuthenticatedUser(request);
-    if (!user) {
+    const auth = await verifyAuth(request);
+    if (auth.error) {
       return NextResponse.json(
-        { success: false, error: 'Unauthorized' },
-        { status: 401 }
+        { success: false, error: auth.error, message: auth.error },
+        { status: auth.status }
       );
     }
-
-    await mongoose.connect(process.env.MONGODB_URI!);
+    const user = auth.user!;
+    const { id } = await params;
+    await mongoose.connect(process.env.MONGODB_URL!);
     
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return NextResponse.json(
@@ -106,26 +93,23 @@ export async function GET(
   }
 }
 
-// PUT update schedule for authenticated staff
-export async function PUT(
-  request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
+// PUT update a schedule
+export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const { id } = await params;
-    const user = await getAuthenticatedUser(request);
-    if (!user) {
+    const auth = await verifyAuth(request);
+    if (auth.error) {
       return NextResponse.json(
-        { success: false, error: 'Unauthorized' },
-        { status: 401 }
+        { success: false, error: auth.error },
+        { status: auth.status }
       );
     }
-
-    await mongoose.connect(process.env.MONGODB_URI!);
+    const user = auth.user!;
+    const { id } = await params;
+    await mongoose.connect(process.env.MONGODB_URL!);
     
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return NextResponse.json(
-        { success: false, error: 'Invalid schedule ID' },
+        { success: false, error: 'Invalid schedule ID', message: 'Invalid schedule ID' },
         { status: 400 }
       );
     }
@@ -140,13 +124,13 @@ export async function PUT(
     
     if (!schedule) {
       return NextResponse.json(
-        { success: false, error: 'Schedule not found' },
+        { success: false, error: 'Schedule not found', message: 'Schedule not found' },
         { status: 404 }
       );
     }
     
     const body = await request.json();
-    const { startTime, endTime, workDays, isOneOff, oneOffDate, timezone, location, notes } = body;
+    const { startTime, endTime, workDays, isOneOff, oneOffDate, timezone, notes } = body;
     
     // Validate workDays if provided
     if (workDays && Array.isArray(workDays)) {
@@ -167,30 +151,21 @@ export async function PUT(
     if (typeof isOneOff === 'boolean') schedule.isOneOff = isOneOff;
     if (oneOffDate !== undefined) schedule.oneOffDate = oneOffDate ? new Date(oneOffDate) : undefined;
     if (timezone) schedule.timezone = timezone;
-    if (location !== undefined) schedule.location = location;
     if (notes !== undefined) schedule.notes = notes;
     
     await schedule.save();
     
-    // Populate the response
-    await schedule.populate('location', 'address city timezone manager');
-    
-    // Create notification for the staff member and location manager
-    if (schedule.location) {
-      const loc = schedule.location as any;
-      if (loc.manager) {
-        await createNotificationForEvent(
-          request,
-          'schedule_updated',
-          {
-            scheduleId: schedule._id.toString(),
-            locationId: loc._id.toString(),
-            message: `Staff member ${user.firstName} updated their schedule at ${loc.address}.`
-          },
-          [loc.manager.toString()]
-        );
-      }
-    }
+    // Create notification for update for the staff member
+    await createNotificationForEvent(
+      request,
+      'schedule_updated',
+      {
+        scheduleId: schedule._id.toString(),
+        startTime: schedule.startTime,
+        endTime: schedule.endTime
+      },
+      [user._id.toString()]
+    );
     
     return NextResponse.json({
       success: true,
@@ -223,22 +198,19 @@ export async function PUT(
   }
 }
 
-// DELETE schedule for authenticated staff
-export async function DELETE(
-  request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
+// DELETE a schedule
+export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const { id } = await params;
-    const user = await getAuthenticatedUser(request);
-    if (!user) {
+    const auth = await verifyAuth(request);
+    if (auth.error) {
       return NextResponse.json(
-        { success: false, error: 'Unauthorized' },
-        { status: 401 }
+        { success: false, error: auth.error },
+        { status: auth.status }
       );
     }
-
-    await mongoose.connect(process.env.MONGODB_URI!);
+    const user = auth.user!;
+    const { id } = await params;
+    await mongoose.connect(process.env.MONGODB_URL!);
     
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return NextResponse.json(

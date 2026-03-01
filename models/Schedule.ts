@@ -10,6 +10,7 @@ export interface ISchedule extends Document {
   timezone: string; // Timezone for this schedule (e.g., 'UTC', 'GMT', 'EST', 'PST')
   location?: Types.ObjectId; // Reference to Location model
   notes?: string; // Additional notes
+  isPublished: boolean; // Whether this schedule has been published
   createdAt: Date;
   updatedAt: Date;
   toLocalSchedule(): Record<string, unknown>;
@@ -31,8 +32,12 @@ const ScheduleSchema: Schema<ISchedule> = new Schema(
       type: Date, 
       required: true,
       validate: {
-        validator: function(this: ISchedule, v: Date) {
-          return v < this.endTime;
+        validator: function(v: Date) {
+          const doc = this as unknown as ISchedule;
+          if ('endTime' in doc && doc.endTime) {
+            return v < doc.endTime;
+          }
+          return true;
         },
         message: 'Start time must be before end time'
       }
@@ -41,16 +46,19 @@ const ScheduleSchema: Schema<ISchedule> = new Schema(
       type: Date, 
       required: true,
       validate: {
-        validator: function(this: ISchedule, v: Date) {
-          return v > this.startTime;
+        validator: function(v: Date) {
+          const doc = this as unknown as ISchedule;
+          if ('startTime' in doc && doc.startTime) {
+            return v > doc.startTime;
+          }
+          return true;
         },
         message: 'End time must be after start time'
       }
     },
     workDays: [{ 
       type: String, 
-      enum: ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'],
-      required: true
+      enum: ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
     }],
     isOneOff: { 
       type: Boolean, 
@@ -59,11 +67,14 @@ const ScheduleSchema: Schema<ISchedule> = new Schema(
     oneOffDate: { 
       type: Date,
       validate: {
-        validator: function(this: ISchedule, v: Date) {
-          // oneOffDate is required if isOneOff is true
-          if (this.isOneOff && !v) return false;
-          // oneOffDate should not be provided if isOneOff is false
-          if (!this.isOneOff && v) return false;
+        validator: function(v: Date) {
+          const doc = this as unknown as ISchedule;
+          if ('isOneOff' in doc) {
+            // oneOffDate is required if isOneOff is true
+            if (doc.isOneOff && !v) return false;
+            // oneOffDate should not be provided if isOneOff is false
+            if (!doc.isOneOff && v) return false;
+          }
           return true;
         },
         message: 'oneOffDate is required for one-off schedules and should not be provided for recurring schedules'
@@ -74,11 +85,10 @@ const ScheduleSchema: Schema<ISchedule> = new Schema(
       required: true,
       validate: {
         validator: function(v: string) {
-          // Common timezone abbreviations validation
-          const validTimezones = ['UTC', 'GMT', 'EST', 'EDT', 'CST', 'CDT', 'MST', 'MDT', 'PST', 'PDT', 'AKST', 'AKDT', 'HST', 'CEST', 'CET', 'IST', 'JST', 'AEST', 'AEDT'];
-          return validTimezones.includes(v);
+          // Supports GMT format like GMT, GMT+1, GMT-1 etc.
+          return /^GMT([+-]\d{1,2})?$/.test(v);
         },
-        message: 'Invalid timezone. Use standard abbreviations like UTC, GMT, EST, PST, etc.'
+        message: 'Invalid timezone format. Use GMT format (e.g., GMT, GMT+1, GMT-5).'
       }
     },
     location: { 
@@ -88,6 +98,10 @@ const ScheduleSchema: Schema<ISchedule> = new Schema(
     notes: { 
       type: String, 
       maxlength: 500 
+    },
+    isPublished: { 
+      type: Boolean, 
+      default: false 
     },
   },
   { 
@@ -119,23 +133,139 @@ ScheduleSchema.virtual('locationDetails', {
   justOne: true
 });
 
-// Pre-save middleware to validate 10-hour gap between schedules
+// Pre-save middleware to validate 10-hour gap and overlaps
 ScheduleSchema.pre('save', async function(this: ISchedule) {
-  if (this.isNew) {
+  if (this.isNew || this.isModified('startTime') || this.isModified('endTime') || this.isModified('workDays') || this.isModified('oneOffDate') || this.isModified('timezone')) {
     try {
-      // Find the last schedule for this staff member
-      const lastSchedule = await Schedule.findOne({ 
+      // 1. Get all schedules for this staff member (excluding current one if updating)
+      const existingSchedules = await (this.constructor as IScheduleModel).find({
         staff: this.staff,
-        endTime: { $lt: this.startTime }
-      }).sort({ endTime: -1 });
+        _id: { $ne: this._id }
+      });
 
-      if (lastSchedule) {
-        const timeDiff = this.startTime.getTime() - lastSchedule.endTime.getTime();
-        const hoursDiff = timeDiff / (1000 * 60 * 60);
-        
-        if (hoursDiff < 10) {
-          const error = new Error(`Schedule must be at least 10 hours after the previous schedule. Only ${hoursDiff.toFixed(1)} hours detected.`);
-          throw error;
+      const normalizeToTimeOnly = (date: Date) => {
+        const d = new Date(date);
+        d.setFullYear(1970, 0, 1);
+        return d.getTime();
+      };
+
+      const convertToTimezone = (date: Date, timezone: string): Date => {
+        const ScheduleModel = this.constructor as IScheduleModel;
+        return ScheduleModel.toLocalTime(date, timezone);
+      };
+
+      for (const other of existingSchedules) {
+        // --- OVERLAP CHECK ---
+        let overlap = false;
+
+        if (this.isOneOff && other.isOneOff) {
+          // Both one-off: Direct date comparison in their respective timezones
+          const thisLocalStart = convertToTimezone(this.startTime, this.timezone);
+          const thisLocalEnd = convertToTimezone(this.endTime, this.timezone);
+          const otherLocalStart = convertToTimezone(other.startTime, other.timezone);
+          const otherLocalEnd = convertToTimezone(other.endTime, other.timezone);
+          
+          overlap = (thisLocalStart < otherLocalEnd && thisLocalEnd > otherLocalStart);
+        } else if (!this.isOneOff && !other.isOneOff) {
+          // Both recurring: Check if any day overlaps (timezone-agnostic for recurring)
+          const commonDays = this.workDays.filter(day => other.workDays.includes(day));
+          if (commonDays.length > 0) {
+            const thisStart = normalizeToTimeOnly(this.startTime);
+            const thisEnd = normalizeToTimeOnly(this.endTime);
+            const otherStart = normalizeToTimeOnly(other.startTime);
+            const otherEnd = normalizeToTimeOnly(other.endTime);
+            overlap = (thisStart < otherEnd && thisEnd > otherStart);
+          }
+        } else {
+          // One is recurring, one is one-off - check timezone-aware conflicts
+          const oneOff = this.isOneOff ? this : other;
+          const recurring = this.isOneOff ? other : this;
+          
+          // Convert one-off date to recurring schedule's timezone for day comparison
+          const oneOffInRecurringTz = convertToTimezone(oneOff.startTime, recurring.timezone);
+          const oneOffDay = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][oneOffInRecurringTz.getDay()];
+          
+          if (recurring.workDays && recurring.workDays.includes(oneOffDay)) {
+            // Compare times in the recurring schedule's timezone
+            const oneOffStartInRecTz = normalizeToTimeOnly(oneOffInRecurringTz);
+            const oneOffEndInRecTz = normalizeToTimeOnly(convertToTimezone(oneOff.endTime, recurring.timezone));
+            const recStart = normalizeToTimeOnly(recurring.startTime);
+            const recEnd = normalizeToTimeOnly(recurring.endTime);
+            
+            overlap = (oneOffStartInRecTz < recEnd && oneOffEndInRecTz > recStart);
+          }
+        }
+
+        if (overlap) {
+          const scheduleType = this.isOneOff ? 'One-off' : 'Recurring';
+          const otherType = other.isOneOff ? 'one-off' : 'recurring';
+          throw new Error(`${scheduleType} schedule conflicts with existing ${otherType} schedule. Schedules cannot overlap across different timezones.`);
+        }
+
+        // --- 10-HOUR GAP CHECK (Rest Rule) ---
+        // This is most critical for One-Off shifts vs anything else on neighboring days
+        if (this.isOneOff) {
+          let gapError = false;
+          let diffHours = 0;
+
+          if (other.isOneOff) {
+            // Check gap between two one-off shifts in their respective timezones
+            const thisLocalEnd = convertToTimezone(this.endTime, this.timezone);
+            const otherLocalStart = convertToTimezone(other.startTime, other.timezone);
+            const otherLocalEnd = convertToTimezone(other.endTime, other.timezone);
+            const thisLocalStart = convertToTimezone(this.startTime, this.timezone);
+            
+            const gap1 = (thisLocalStart.getTime() - otherLocalEnd.getTime()) / (1000 * 60 * 60);
+            const gap2 = (otherLocalStart.getTime() - thisLocalEnd.getTime()) / (1000 * 60 * 60);
+            
+            // If they are on the same or adjacent days, check
+            if ((gap1 > 0 && gap1 < 10) || (gap2 > 0 && gap2 < 10)) {
+              gapError = true;
+              diffHours = gap1 > 0 ? gap1 : gap2;
+            }
+          } else {
+            // Check one-off vs recurring - timezone-aware gap checking
+            const targetDate = new Date(this.startTime);
+            const daysToCheck = [-1, 0, 1]; // Previous, current, next day
+            
+            for (const offset of daysToCheck) {
+              const checkDate = new Date(targetDate);
+              checkDate.setDate(checkDate.getDate() + offset);
+              
+              // Convert to recurring schedule's timezone for day comparison
+              const checkDateInRecTz = convertToTimezone(checkDate, recurring.timezone);
+              const dayName = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][checkDateInRecTz.getDay()];
+              
+              if (other.workDays && other.workDays.includes(dayName)) {
+                // Construct virtual Date for the recurring shift on that specific day in recurring's timezone
+                const recStart = new Date(checkDateInRecTz);
+                recStart.setHours(other.startTime.getHours(), other.startTime.getMinutes(), 0, 0);
+                
+                const recEnd = new Date(checkDateInRecTz);
+                recEnd.setHours(other.endTime.getHours(), other.endTime.getMinutes(), 0, 0);
+                if (recEnd < recStart) recEnd.setDate(recEnd.getDate() + 1); // Handle overnight
+
+                // Convert both to one-off's timezone for accurate gap calculation
+                const recStartInOneOffTz = convertToTimezone(recStart, this.timezone);
+                const recEndInOneOffTz = convertToTimezone(recEnd, this.timezone);
+                const oneOffStart = convertToTimezone(this.startTime, this.timezone);
+                const oneOffEnd = convertToTimezone(this.endTime, this.timezone);
+
+                const gap1 = (oneOffStart.getTime() - recEndInOneOffTz.getTime()) / (1000 * 60 * 60);
+                const gap2 = (recStartInOneOffTz.getTime() - oneOffEnd.getTime()) / (1000 * 60 * 60);
+                
+                if ((gap1 > 0 && gap1 < 10) || (gap2 > 0 && gap2 < 10)) {
+                  gapError = true;
+                  diffHours = gap1 > 0 ? gap1 : gap2;
+                  break;
+                }
+              }
+            }
+          }
+
+          if (gapError) {
+            throw new Error(`10-hour rest rule violation: Only ${diffHours.toFixed(1)} hours rest between shifts across timezones.`);
+          }
         }
       }
     } catch (error) {
@@ -146,27 +276,35 @@ ScheduleSchema.pre('save', async function(this: ISchedule) {
 
 // Static method to convert UTC time to local timezone
 ScheduleSchema.statics.toLocalTime = function(utcDate: Date, timezone: string): Date {
-  // Map timezone abbreviations to IANA timezone names
   const timezoneMap: Record<string, string> = {
-    'UTC': 'UTC',
-    'GMT': 'GMT',
-    'EST': 'America/New_York',
-    'EDT': 'America/New_York',
-    'CST': 'America/Chicago',
-    'CDT': 'America/Chicago',
-    'MST': 'America/Denver',
-    'MDT': 'America/Denver',
-    'PST': 'America/Los_Angeles',
-    'PDT': 'America/Los_Angeles',
-    'AKST': 'America/Anchorage',
-    'AKDT': 'America/Anchorage',
-    'HST': 'Pacific/Honolulu',
-    'CEST': 'Europe/Paris',
-    'CET': 'Europe/Paris',
-    'IST': 'Asia/Kolkata',
-    'JST': 'Asia/Tokyo',
-    'AEST': 'Australia/Sydney',
-    'AEDT': 'Australia/Sydney'
+    'GMT': 'UTC',
+    'GMT+0': 'UTC',
+    'GMT+1': 'Etc/GMT-1',
+    'GMT+2': 'Etc/GMT-2',
+    'GMT+3': 'Etc/GMT-3',
+    'GMT+4': 'Etc/GMT-4',
+    'GMT+5': 'Etc/GMT-5',
+    'GMT+6': 'Etc/GMT-6',
+    'GMT+7': 'Etc/GMT-7',
+    'GMT+8': 'Etc/GMT-8',
+    'GMT+9': 'Etc/GMT-9',
+    'GMT+10': 'Etc/GMT-10',
+    'GMT+11': 'Etc/GMT-11',
+    'GMT+12': 'Etc/GMT-12',
+    'GMT+13': 'Etc/GMT-13',
+    'GMT+14': 'Etc/GMT-14',
+    'GMT-1': 'Etc/GMT+1',
+    'GMT-2': 'Etc/GMT+2',
+    'GMT-3': 'Etc/GMT+3',
+    'GMT-4': 'Etc/GMT+4',
+    'GMT-5': 'Etc/GMT+5',
+    'GMT-6': 'Etc/GMT+6',
+    'GMT-7': 'Etc/GMT+7',
+    'GMT-8': 'Etc/GMT+8',
+    'GMT-9': 'Etc/GMT+9',
+    'GMT-10': 'Etc/GMT+10',
+    'GMT-11': 'Etc/GMT+11',
+    'GMT-12': 'Etc/GMT+12'
   };
   
   const ianaTimezone = timezoneMap[timezone] || 'UTC';
@@ -175,27 +313,35 @@ ScheduleSchema.statics.toLocalTime = function(utcDate: Date, timezone: string): 
 
 // Static method to convert local time to UTC
 ScheduleSchema.statics.toUTC = function(localDate: Date, timezone: string): Date {
-  // Map timezone abbreviations to IANA timezone names
   const timezoneMap: Record<string, string> = {
-    'UTC': 'UTC',
-    'GMT': 'GMT',
-    'EST': 'America/New_York',
-    'EDT': 'America/New_York',
-    'CST': 'America/Chicago',
-    'CDT': 'America/Chicago',
-    'MST': 'America/Denver',
-    'MDT': 'America/Denver',
-    'PST': 'America/Los_Angeles',
-    'PDT': 'America/Los_Angeles',
-    'AKST': 'America/Anchorage',
-    'AKDT': 'America/Anchorage',
-    'HST': 'Pacific/Honolulu',
-    'CEST': 'Europe/Paris',
-    'CET': 'Europe/Paris',
-    'IST': 'Asia/Kolkata',
-    'JST': 'Asia/Tokyo',
-    'AEST': 'Australia/Sydney',
-    'AEDT': 'Australia/Sydney'
+    'GMT': 'UTC',
+    'GMT+0': 'UTC',
+    'GMT+1': 'Etc/GMT-1',
+    'GMT+2': 'Etc/GMT-2',
+    'GMT+3': 'Etc/GMT-3',
+    'GMT+4': 'Etc/GMT-4',
+    'GMT+5': 'Etc/GMT-5',
+    'GMT+6': 'Etc/GMT-6',
+    'GMT+7': 'Etc/GMT-7',
+    'GMT+8': 'Etc/GMT-8',
+    'GMT+9': 'Etc/GMT-9',
+    'GMT+10': 'Etc/GMT-10',
+    'GMT+11': 'Etc/GMT-11',
+    'GMT+12': 'Etc/GMT-12',
+    'GMT+13': 'Etc/GMT-13',
+    'GMT+14': 'Etc/GMT-14',
+    'GMT-1': 'Etc/GMT+1',
+    'GMT-2': 'Etc/GMT+2',
+    'GMT-3': 'Etc/GMT+3',
+    'GMT-4': 'Etc/GMT+4',
+    'GMT-5': 'Etc/GMT+5',
+    'GMT-6': 'Etc/GMT+6',
+    'GMT-7': 'Etc/GMT+7',
+    'GMT-8': 'Etc/GMT+8',
+    'GMT-9': 'Etc/GMT+9',
+    'GMT-10': 'Etc/GMT+10',
+    'GMT-11': 'Etc/GMT+11',
+    'GMT-12': 'Etc/GMT+12'
   };
   
   const ianaTimezone = timezoneMap[timezone] || 'UTC';
@@ -215,6 +361,6 @@ ScheduleSchema.methods.toLocalSchedule = function(this: ISchedule): Record<strin
   };
 };
 
-const Schedule: IScheduleModel = mongoose.models.Schedule || mongoose.model<ISchedule>('Schedule', ScheduleSchema);
+const Schedule = (mongoose.models.Schedule as IScheduleModel) || mongoose.model<ISchedule, IScheduleModel>('Schedule', ScheduleSchema);
 
 export default Schedule;

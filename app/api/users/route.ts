@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import mongoose from 'mongoose';
 import bcrypt from 'bcryptjs';
 import connectToDatabase from '@/lib/mongodb';
-import User, { IUser } from '@/models/User';
+import User from '@/models/User';
+import Staff from '@/models/Staff';
 import { verifyAuth, verifyAdmin } from '@/lib/auth';
 import { sanitizeUserCreation } from '@/lib/validation';
 import { handleImageUpload, validateContentType } from '@/lib/uploadMiddleware';
@@ -84,6 +85,24 @@ export async function POST(req: NextRequest) {
 
     await newUser.save();
 
+    // Create staff record for staff and manager roles
+    if (sanitizedData.role === 'staff' || sanitizedData.role === 'manager') {
+      try {
+        const existingStaff = await Staff.findOne({ user: newUser._id });
+        if (!existingStaff) {
+          const staffRecord = new Staff({
+            user: newUser._id,
+            designation: sanitizedData.role === 'manager' ? 'Manager' : 'Staff Member',
+            status: 'active'
+          });
+          await staffRecord.save();
+        }
+      } catch (staffError) {
+        console.error('Failed to create staff record:', staffError);
+        // Continue with user creation even if staff record fails
+      }
+    }
+
     const successMessage = !existingAdmin 
       ? 'First admin user created successfully. You can now log in and create additional users.'
       : 'User created successfully';
@@ -141,7 +160,7 @@ export async function GET(req: NextRequest) {
     const roleFilter = searchParams.get('role') || '';
 
     // Build query
-    const query: mongoose.FilterQuery<IUser> = {};
+    const query: Record<string, unknown> = {};
     if (search) {
       query.$or = [
         { firstName: { $regex: search, $options: 'i' } },

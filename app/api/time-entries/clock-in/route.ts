@@ -19,10 +19,10 @@ async function getAuthenticatedUser(request: NextRequest) {
     const token = authHeader.substring(7);
     const decoded = jwt.verify(token, process.env.JWT_SECRET!) as { userId: string };
     
-    await mongoose.connect(process.env.MONGODB_URI!);
+    await mongoose.connect(process.env.MONGODB_URL!);
     const user = await User.findById(decoded.userId);
     
-    if (!user || (user.role !== 'admin' && user.role !== 'manager' && user.role !== 'user')) {
+    if (!user || (user.role !== 'admin' && user.role !== 'manager' && user.role !== 'staff')) {
       return null;
     }
 
@@ -90,7 +90,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    await mongoose.connect(process.env.MONGODB_URI!);
+    await mongoose.connect(process.env.MONGODB_URL!);
     
     const body = await request.json();
     const { timezone, location, notes } = body;

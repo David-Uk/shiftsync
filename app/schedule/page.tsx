@@ -5,25 +5,22 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/contexts/ToastContext';
 import DashboardLayout from '@/components/DashboardLayout';
-import { Calendar, Users, Plus, Edit, MapPin, Trash2 } from 'lucide-react';
+import { Calendar, Users, Plus, Edit, Trash2, Clock, Globe } from 'lucide-react';
 
 interface Schedule {
   _id: string;
-  weekStart: string;
-  weekEnd: string;
-  location: {
-    _id: string;
-    address: string;
-    city: string;
-    timezone: string;
+  staff: {
+    firstName: string;
+    lastName: string;
+    email: string;
   };
-  shifts: Array<{
-    _id: string;
-    startTime: string;
-    endTime: string;
-    role: string;
-    status: string;
-  }>;
+  startTime: string;
+  endTime: string;
+  workDays: string[];
+  isOneOff: boolean;
+  oneOffDate?: string;
+  timezone: string;
+  notes?: string;
   isPublished: boolean;
   createdAt: string;
 }
@@ -49,11 +46,9 @@ export default function SchedulePage() {
     isOneOff: false,
     oneOffDate: '',
     timezone: 'UTC',
-    location: '',
     notes: ''
   });
   const [staff, setStaff] = useState([]);
-  const [locations, setLocations] = useState([]);
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -109,25 +104,8 @@ export default function SchedulePage() {
       }
     };
 
-    const fetchLocations = async () => {
-      try {
-        const token = localStorage.getItem('token');
-        const response = await fetch('/api/locations', {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-
-        if (response.ok) {
-          const data = await response.json();
-          setLocations(data.data || []);
-        }
-      } catch (error) {
-        console.error('Error fetching locations:', error);
-      }
-    };
-
     fetchSchedules();
     fetchStaff();
-    fetchLocations();
   }, [isAuthenticated, router, user?.role, user?._id, user?.id]);
 
   // Real-time time gap validation
@@ -154,10 +132,10 @@ export default function SchedulePage() {
       let gap: number;
       if (endMinutes > startMinutes) {
         // Same day shift (e.g., 7 AM to 11 PM) - gap to next day's start (11 PM to 7 AM)
-        gap = (24 * 60 - endMinutes) + startMinutes; 
+        gap = (24 * 60 - endMinutes) + startMinutes;
       } else {
         // Overnight shift (e.g., 10 PM to 6 AM) - gap is from end to next day's start (6 AM to 10 PM)
-        gap = startMinutes - endMinutes; 
+        gap = startMinutes - endMinutes;
       }
 
       if (gap < 10 * 60) { // 10 hours in minutes
@@ -197,7 +175,6 @@ export default function SchedulePage() {
       isOneOff: false,
       oneOffDate: '',
       timezone: 'UTC',
-      location: '',
       notes: ''
     });
     setValidationError(null);
@@ -258,25 +235,37 @@ export default function SchedulePage() {
         setValidationError(null);
         return true;
       case 2:
-        const workDaysValid = formData.workDays.length > 0;
-        if (!workDaysValid && showToast) {
-          showError('Please select at least one work day');
+        if (formData.isOneOff) {
+          const dateValid = !!formData.oneOffDate;
+          if (!dateValid && showToast) {
+            showError('Please select a date for the one-off schedule');
+          }
+          return dateValid;
+        } else {
+          const workDaysValid = formData.workDays.length > 0;
+          if (!workDaysValid && showToast) {
+            showError('Please select at least one work day');
+          }
+          return workDaysValid;
         }
-        return workDaysValid;
       case 3:
-        return true; // Final step - all fields are optional
+        const timezoneValid = !!formData.timezone;
+        if (!timezoneValid && showToast) {
+          showError('Please select a timezone');
+        }
+        return timezoneValid;
       default:
         return false;
     }
   };
 
   const handleCreateSchedule = async () => {
-    const staffId = user?.role === 'staff' ? (user._id || user.id) : formData.staff;
-
-    if (!staffId || !formData.startTime || !formData.endTime || formData.workDays.length === 0) {
-      alert('Please fill in all required fields');
+    // Perform final validation across all steps
+    if (!validateStep(1, true) || !validateStep(2, true) || !validateStep(3, true)) {
       return;
     }
+
+    const staffId = user?.role === 'staff' ? (user._id || user.id) : formData.staff;
 
     try {
       setFormLoading(true);
@@ -300,18 +289,20 @@ export default function SchedulePage() {
       const startTime24 = convertTo24Hour(formData.startTime, formData.startAmPm);
       const endTime24 = convertTo24Hour(formData.endTime, formData.endAmPm);
 
-      const startDate = new Date(`1970-01-01T${startTime24}:00`);
-      const endDate = new Date(`1970-01-01T${endTime24}:00`);
+      // For one-off schedules, we use the specific date. For recurring, we use 1970-01-01 template
+      const baseDate = formData.isOneOff ? formData.oneOffDate : '1970-01-01';
+
+      const startDate = new Date(`${baseDate}T${startTime24}:00`);
+      const endDate = new Date(`${baseDate}T${endTime24}:00`);
 
       const scheduleData = {
         staff: staffId,
         startTime: startDate.toISOString(),
         endTime: endDate.toISOString(),
-        workDays: formData.workDays,
+        workDays: formData.isOneOff ? [] : formData.workDays,
         isOneOff: formData.isOneOff,
         oneOffDate: formData.isOneOff && formData.oneOffDate ? new Date(formData.oneOffDate).toISOString() : undefined,
         timezone: formData.timezone,
-        location: formData.location || undefined,
         notes: formData.notes || undefined
       };
 
@@ -338,7 +329,6 @@ export default function SchedulePage() {
           isOneOff: false,
           oneOffDate: '',
           timezone: 'UTC',
-          location: '',
           notes: ''
         });
       } else {
@@ -354,6 +344,10 @@ export default function SchedulePage() {
   };
 
   const handlePublishSchedule = async (scheduleId: string) => {
+    console.log('Publishing schedule with ID:', scheduleId);
+    console.log('Schedule ID type:', typeof scheduleId);
+    console.log('Schedule ID length:', scheduleId.length);
+
     try {
       const token = localStorage.getItem('token');
       const response = await fetch(`/api/schedules/${scheduleId}/publish`, {
@@ -374,10 +368,12 @@ export default function SchedulePage() {
           )
         );
       } else {
-        throw new Error('Failed to publish schedule');
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.message || errorData.error || 'Failed to publish schedule');
       }
     } catch (error) {
       console.error('Error publishing schedule:', error);
+      alert(error instanceof Error ? error.message : 'Failed to publish schedule');
     }
   };
 
@@ -437,8 +433,9 @@ export default function SchedulePage() {
               </p>
             </div>
 
-            {user?.role === 'staff' && (
+            {(user?.role === 'staff' || user?.role === 'admin' || user?.role === 'manager') && (
               <button
+                type="button"
                 onClick={() => setShowCreateForm(!showCreateForm)}
                 className="mt-4 sm:mt-0 sm:ml-4 bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700 flex items-center"
               >
@@ -451,12 +448,16 @@ export default function SchedulePage() {
 
         {/* Create Form Modal */}
         {showCreateForm && (
-          <div className="fixed inset-0 bg-gray-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4 transition-opacity duration-300">
-            <div className="bg-white/95 backdrop-blur-md rounded-2xl shadow-2xl border border-white/20 max-w-2xl w-full max-h-[85vh] overflow-y-auto overflow-x-hidden transform transition-all translate-y-8">
-              <div className="p-6">
-                <div className="flex items-center justify-between mb-6 pb-3 border-b border-gray-100">
-                  <h2 className="text-xl font-semibold text-gray-900">Create New Schedule</h2>
+          <div className="fixed inset-0 bg-gray-950/40 backdrop-blur-sm z-50 flex items-center justify-center p-4 transition-all duration-300">
+            <div className="bg-white rounded-[2rem] shadow-2xl border border-gray-100 max-w-md w-full max-h-[90vh] overflow-hidden flex flex-col transform transition-all animate-in fade-in zoom-in duration-300">
+              <div className="flex-1 overflow-y-auto p-8 scrollbar-hide">
+                <div className="flex items-center justify-between mb-8">
+                  <div>
+                    <h2 className="text-2xl font-bold text-gray-900 tracking-tight">Create Schedule</h2>
+                    <p className="text-gray-500 text-xs mt-1">Plan your next work shift.</p>
+                  </div>
                   <button
+                    type="button"
                     onClick={() => setShowCreateForm(false)}
                     className="p-1.5 text-gray-400 bg-gray-50 rounded-full hover:text-gray-600 hover:bg-gray-100 transition-colors"
                   >
@@ -465,34 +466,18 @@ export default function SchedulePage() {
                 </div>
 
                 {/* Multi-Step Schedule Form */}
-                <form onSubmit={(e) => { e.preventDefault(); if (currentStep === 3) handleCreateSchedule(); }} className="space-y-6">
-                  {/* Step Progress */}
-                  <div className="flex items-center justify-between mb-8">
+                <div className="space-y-6">
+                  {/* Compact Step Progress */}
+                  <div className="flex items-center space-x-1 mb-8">
                     {[1, 2, 3].map((step) => (
-                      <div key={step} className="flex items-center">
-                        <div
-                          className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-semibold transition-colors ${currentStep >= step
-                            ? 'bg-indigo-600 text-white'
-                            : 'bg-gray-200 text-gray-600'
-                            }`}
-                        >
-                          {step}
-                        </div>
-                        {step < 3 && (
-                          <div
-                            className={`w-full h-1 mx-2 transition-colors ${currentStep > step ? 'bg-indigo-600' : 'bg-gray-200'
-                              }`}
-                          />
-                        )}
-                      </div>
+                      <div key={step} className={`h-1 flex-1 rounded-full transition-all duration-500 ${currentStep >= step ? 'bg-indigo-600' : 'bg-gray-100'}`} />
                     ))}
                   </div>
 
                   {/* Step 1: Basic Information */}
                   {currentStep === 1 && (
-                    <div className="space-y-4">
-                      <h3 className="text-lg font-semibold text-gray-900 mb-4">Basic Information</h3>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-6 animate-in slide-in-from-right-4 duration-300">
+                      <div className="grid grid-cols-1 gap-5">
                         <div>
                           <label className="block text-sm font-semibold text-gray-700 mb-1.5">Staff Member *</label>
                           {user?.role === 'staff' ? (
@@ -518,27 +503,9 @@ export default function SchedulePage() {
                             </select>
                           )}
                         </div>
-
-                        {user?.role !== 'staff' && (
-                          <div>
-                            <label className="block text-sm font-semibold text-gray-700 mb-1.5">Location</label>
-                            <select
-                              value={formData.location}
-                              onChange={(e) => setFormData(prev => ({ ...prev, location: e.target.value }))}
-                              className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all duration-200 outline-none text-sm"
-                            >
-                              <option value="">Select location (optional)</option>
-                              {locations.map((location: { _id: string, address: string, city: string }) => (
-                                <option key={location._id} value={location._id}>
-                                  {location.address}, {location.city}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-                        )}
                       </div>
 
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="grid grid-cols-2 gap-4">
                         <div>
                           <label className="block text-sm font-semibold text-gray-700 mb-1.5">Start Time *</label>
                           <div className="flex space-x-2">
@@ -547,7 +514,6 @@ export default function SchedulePage() {
                               value={formData.startTime}
                               onChange={(e) => setFormData(prev => ({ ...prev, startTime: e.target.value }))}
                               className="flex-1 px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all duration-200 outline-none text-sm"
-                              required
                             />
                             <select
                               value={formData.startAmPm}
@@ -568,7 +534,6 @@ export default function SchedulePage() {
                               value={formData.endTime}
                               onChange={(e) => setFormData(prev => ({ ...prev, endTime: e.target.value }))}
                               className="flex-1 px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all duration-200 outline-none text-sm"
-                              required
                             />
                             <select
                               value={formData.endAmPm}
@@ -608,32 +573,69 @@ export default function SchedulePage() {
                     </div>
                   )}
 
-                  {/* Step 2: Work Days */}
+                  {/* Step 2: Schedule Type & Days/Date */}
                   {currentStep === 2 && (
-                    <div className="space-y-4">
-                      <h3 className="text-lg font-semibold text-gray-900 mb-4">Work Days</h3>
-                      <div>
-                        <label className="block text-sm font-semibold text-gray-700 mb-3">Select Work Days *</label>
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                          {['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'].map((day) => (
-                            <label key={day} className="flex items-center space-x-3 p-3 border border-gray-200 rounded-xl hover:bg-gray-50 cursor-pointer transition-colors">
-                              <input
-                                type="checkbox"
-                                checked={formData.workDays.includes(day)}
-                                onChange={(e) => {
-                                  if (e.target.checked) {
-                                    setFormData(prev => ({ ...prev, workDays: [...prev.workDays, day] }));
-                                  } else {
-                                    setFormData(prev => ({ ...prev, workDays: prev.workDays.filter(d => d !== day) }));
-                                  }
-                                }}
-                                className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                              />
-                              <span className="text-gray-700 font-medium">{day}</span>
-                            </label>
-                          ))}
-                        </div>
+                    <div className="space-y-6">
+                      <h3 className="text-lg font-semibold text-gray-900 mb-4">Schedule Type & Availability</h3>
+
+                      <div className="flex space-x-4 mb-6">
+                        <button
+                          type="button"
+                          onClick={() => setFormData(prev => ({ ...prev, isOneOff: false, oneOffDate: '' }))}
+                          className={`flex-1 p-4 rounded-xl border-2 transition-all duration-200 text-center ${!formData.isOneOff
+                            ? 'border-indigo-600 bg-indigo-50 text-indigo-700'
+                            : 'border-gray-100 bg-gray-50 text-gray-500 hover:border-gray-200'}`}
+                        >
+                          <div className="font-bold mb-1">Recurring</div>
+                          <div className="text-xs">Repeats weekly</div>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setFormData(prev => ({ ...prev, isOneOff: true, workDays: [] }))}
+                          className={`flex-1 p-4 rounded-xl border-2 transition-all duration-200 text-center ${formData.isOneOff
+                            ? 'border-indigo-600 bg-indigo-50 text-indigo-700'
+                            : 'border-gray-100 bg-gray-50 text-gray-500 hover:border-gray-200'}`}
+                        >
+                          <div className="font-bold mb-1">One-off</div>
+                          <div className="text-xs">Single occurrence</div>
+                        </button>
                       </div>
+
+                      {!formData.isOneOff ? (
+                        <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
+                          <label className="block text-sm font-semibold text-gray-700 mb-3">Select Work Days *</label>
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                            {['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'].map((day) => (
+                              <label key={day} className="flex items-center space-x-3 p-3 border border-gray-200 rounded-xl hover:bg-gray-50 cursor-pointer transition-colors">
+                                <input
+                                  type="checkbox"
+                                  checked={formData.workDays.includes(day)}
+                                  onChange={(e) => {
+                                    if (e.target.checked) {
+                                      setFormData(prev => ({ ...prev, workDays: [...prev.workDays, day] }));
+                                    } else {
+                                      setFormData(prev => ({ ...prev, workDays: prev.workDays.filter(d => d !== day) }));
+                                    }
+                                  }}
+                                  className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                />
+                                <span className="text-gray-700 font-medium">{day}</span>
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
+                          <label className="block text-sm font-semibold text-gray-700 mb-1.5">Select Date *</label>
+                          <input
+                            type="date"
+                            value={formData.oneOffDate}
+                            onChange={(e) => setFormData(prev => ({ ...prev, oneOffDate: e.target.value }))}
+                            className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all duration-200 outline-none text-sm"
+                          />
+                          <p className="mt-2 text-xs text-gray-500 italic">This schedule will only apply to the selected date.</p>
+                        </div>
+                      )}
                     </div>
                   )}
 
@@ -649,45 +651,34 @@ export default function SchedulePage() {
                             onChange={(e) => setFormData(prev => ({ ...prev, timezone: e.target.value }))}
                             className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all duration-200 outline-none text-sm"
                           >
-                            <option value="UTC">🌍 UTC (Coordinated Universal Time)</option>
-                            <option value="GMT">🇬🇧 GMT (Greenwich Mean Time)</option>
-                            <option value="EST">🇺🇸 EST (Eastern Standard Time)</option>
-                            <option value="EDT">🇺🇸 EDT (Eastern Daylight Time)</option>
-                            <option value="CST">🇺🇸 CST (Central Standard Time)</option>
-                            <option value="CDT">🇺🇸 CDT (Central Daylight Time)</option>
-                            <option value="MST">🇺🇸 MST (Mountain Standard Time)</option>
-                            <option value="MDT">🇺🇸 MDT (Mountain Daylight Time)</option>
-                            <option value="PST">🇺🇸 PST (Pacific Standard Time)</option>
-                            <option value="PDT">🇺🇸 PDT (Pacific Daylight Time)</option>
-                            <option value="CET">🇪🇺 CET (Central European Time)</option>
-                            <option value="CEST">🇪🇺 CEST (Central European Summer Time)</option>
-                            <option value="IST">🇮🇳 IST (India Standard Time)</option>
-                            <option value="JST">🇯🇵 JST (Japan Standard Time)</option>
-                            <option value="AEST">🇦🇺 AEST (Australian Eastern Standard Time)</option>
-                            <option value="AEDT">🇦🇺 AEDT (Australian Eastern Daylight Time)</option>
-                            <option value="HST">🇺🇸 HST (Hawaii Standard Time)</option>
+                            <option value="GMT-12">GMT-12 (International Date Line West)</option>
+                            <option value="GMT-11">GMT-11 (Midway Island, Samoa)</option>
+                            <option value="GMT-10">GMT-10 (Hawaii)</option>
+                            <option value="GMT-9">GMT-9 (Alaska)</option>
+                            <option value="GMT-8">GMT-8 (Pacific Time - US & Canada)</option>
+                            <option value="GMT-7">GMT-7 (Mountain Time - US & Canada)</option>
+                            <option value="GMT-6">GMT-6 (Central Time - US & Canada)</option>
+                            <option value="GMT-5">GMT-5 (Eastern Time - US & Canada)</option>
+                            <option value="GMT-4">GMT-4 (Atlantic Time - Canada, Caracas)</option>
+                            <option value="GMT-3">GMT-3 (Buenos Aires, Greenland)</option>
+                            <option value="GMT-2">GMT-2 (Mid-Atlantic)</option>
+                            <option value="GMT-1">GMT-1 (Azores, Cape Verde Islands)</option>
+                            <option value="GMT">GMT (Greenwich Mean Time, London, Lisbon)</option>
+                            <option value="GMT+1">GMT+1 (Central European Time, Paris, Lagos)</option>
+                            <option value="GMT+2">GMT+2 (Eastern European Time, Cairo, Johannesburg)</option>
+                            <option value="GMT+3">GMT+3 (Moscow, Nairobi, Baghdad)</option>
+                            <option value="GMT+4">GMT+4 (Abu Dhabi, Muscat, Tbilisi)</option>
+                            <option value="GMT+5">GMT+5 (Islamabad, Karachi, Tashkent)</option>
+                            <option value="GMT+6">GMT+6 (Almaty, Dhaka, Colombo)</option>
+                            <option value="GMT+7">GMT+7 (Bangkok, Hanoi, Jakarta)</option>
+                            <option value="GMT+8">GMT+8 (Beijing, Perth, Singapore, Hong Kong)</option>
+                            <option value="GMT+9">GMT+9 (Tokyo, Seoul, Osaka)</option>
+                            <option value="GMT+10">GMT+10 (Sydney, Guam, Port Moresby)</option>
+                            <option value="GMT+11">GMT+11 (Magadan, Solomon Islands)</option>
+                            <option value="GMT+12">GMT+12 (Auckland, Wellington, Fiji)</option>
+                            <option value="GMT+13">GMT+13 (Nuku&apos;alofa)</option>
+                            <option value="GMT+14">GMT+14 (Kiritimati)</option>
                           </select>
-                        </div>
-
-                        <div>
-                          <label className="block text-sm font-semibold text-gray-700 mb-1.5">
-                            <input
-                              type="checkbox"
-                              checked={formData.isOneOff}
-                              onChange={(e) => setFormData(prev => ({ ...prev, isOneOff: e.target.checked }))}
-                              className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 mr-2"
-                            />
-                            One-off Schedule
-                          </label>
-                          {formData.isOneOff && (
-                            <input
-                              type="date"
-                              value={formData.oneOffDate}
-                              onChange={(e) => setFormData(prev => ({ ...prev, oneOffDate: e.target.value }))}
-                              className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all duration-200 outline-none text-sm mt-2"
-                              required
-                            />
-                          )}
                         </div>
                       </div>
 
@@ -703,60 +694,61 @@ export default function SchedulePage() {
                       </div>
                     </div>
                   )}
+                </div>
+              </div>
 
-                  {/* Modal Actions */}
-                  <div className="flex justify-between items-center mt-8 pt-6 border-t border-gray-100">
+              {/* Modal Actions */}
+              <div className="p-6 bg-gray-50/50 border-t border-gray-100 flex justify-between items-center">
+                <button
+                  type="button"
+                  onClick={resetForm}
+                  className="px-4 py-2 text-gray-600 hover:text-gray-800 font-medium transition-colors text-sm"
+                >
+                  Cancel
+                </button>
+                <div className="flex space-x-3">
+                  {currentStep > 1 && (
                     <button
                       type="button"
-                      onClick={resetForm}
-                      className="px-4 py-2 text-gray-600 hover:text-gray-800 font-medium transition-colors text-sm"
+                      onClick={prevStep}
+                      className="px-4 py-2 bg-gray-200 text-gray-700 rounded-xl hover:bg-gray-300 font-medium transition-colors text-sm"
                     >
-                      Cancel
+                      Previous
                     </button>
-                    <div className="flex space-x-3">
-                      {currentStep > 1 && (
-                        <button
-                          type="button"
-                          onClick={prevStep}
-                          className="px-4 py-2 bg-gray-200 text-gray-700 rounded-xl hover:bg-gray-300 font-medium transition-colors text-sm"
-                        >
-                          Previous
-                        </button>
-                      )}
-                      {currentStep < 3 ? (
-                        <button
-                          type="button"
-                          onClick={nextStep}
-                          disabled={
-                            (currentStep === 1 && (!(user?.role === 'staff' || formData.staff) || !formData.startTime || !formData.endTime || !!timeGapError)) ||
-                            (currentStep === 2 && formData.workDays.length === 0)
-                          }
-                          className="px-4 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 font-medium transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                          Next
-                        </button>
+                  )}
+                  {currentStep < 3 ? (
+                    <button
+                      type="button"
+                      onClick={nextStep}
+                      disabled={
+                        (currentStep === 1 && (!(user?.role === 'staff' || formData.staff) || !formData.startTime || !formData.endTime || !!timeGapError)) ||
+                        (currentStep === 2 && (formData.isOneOff ? !formData.oneOffDate : formData.workDays.length === 0))
+                      }
+                      className="px-4 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 font-medium transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Next
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={handleCreateSchedule}
+                      disabled={formLoading || !formData.timezone}
+                      className="px-4 py-2 bg-gradient-to-r from-indigo-600 to-indigo-700 text-white rounded-xl shadow-md shadow-indigo-200/50 hover:shadow-lg hover:shadow-indigo-300/50 hover:-translate-y-0.5 transition-all duration-200 flex items-center font-medium text-sm disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
+                    >
+                      {formLoading ? (
+                        <>
+                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                          Creating...
+                        </>
                       ) : (
-                        <button
-                          type="submit"
-                          disabled={formLoading}
-                          className="px-4 py-2 bg-gradient-to-r from-indigo-600 to-indigo-700 text-white rounded-xl shadow-md shadow-indigo-200/50 hover:shadow-lg hover:shadow-indigo-300/50 hover:-translate-y-0.5 transition-all duration-200 flex items-center font-medium text-sm disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
-                        >
-                          {formLoading ? (
-                            <>
-                              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                              Creating...
-                            </>
-                          ) : (
-                            <>
-                              <Plus className="h-4 w-4 mr-1.5" />
-                              Create Schedule
-                            </>
-                          )}
-                        </button>
+                        <>
+                          <Plus className="h-4 w-4 mr-1.5" />
+                          Create Schedule
+                        </>
                       )}
-                    </div>
-                  </div>
-                </form>
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           </div>
@@ -777,36 +769,54 @@ export default function SchedulePage() {
             </div>
           ) : (
             <div className="divide-y divide-gray-200">
-              {schedules.map((schedule) => (
+              {schedules.map((schedule: Schedule) => (
                 <div
                   key={schedule._id}
-                  className="p-6 border-b border-gray-200 last:border-b-0"
+                  className="p-6 border-b border-gray-200 last:border-b-0 hover:bg-gray-50/50 transition-colors"
                 >
                   <div className="flex items-start justify-between">
                     <div className="flex-1">
-                      <div className="flex items-center space-x-3 mb-2">
-                        <div className="flex items-center text-sm text-gray-500">
-                          <Calendar className="h-4 w-4 mr-1" />
-                          {new Date(schedule.weekStart).toLocaleDateString()} - {new Date(schedule.weekEnd).toLocaleDateString()}
+                      <div className="flex flex-col mb-2">
+                        <div className="flex items-center text-sm font-semibold text-gray-900">
+                          {schedule.isOneOff ? (
+                            <div className="flex items-center text-indigo-600 bg-indigo-50 px-2.5 py-1 rounded-lg">
+                              <Calendar className="h-4 w-4 mr-2" />
+                              One-off: {new Date(schedule.startTime).toLocaleDateString()}
+                            </div>
+                          ) : (
+                            <div className="flex items-center text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-lg">
+                              <Users className="h-4 w-4 mr-2" />
+                              Recurring: {schedule.workDays.join(', ')}
+                            </div>
+                          )}
                         </div>
-                        <div className="flex items-center text-sm text-gray-500">
-                          <Users className="h-4 w-4 mr-1" />
-                          {schedule.shifts?.length || 0} shifts
+
+                        <div className="flex flex-wrap items-center mt-3 gap-y-2 text-sm text-gray-500">
+                          <div className="flex items-center mr-4">
+                            <Clock className="h-4 w-4 mr-1.5 text-gray-400" />
+                            {new Date(schedule.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - {new Date(schedule.endTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </div>
+                          <div className="flex items-center mr-4">
+                            <Globe className="h-4 w-4 mr-1.5 text-gray-400" />
+                            {schedule.timezone}
+                          </div>
                         </div>
-                        <div className="flex items-center text-sm text-gray-500">
-                          <MapPin className="h-4 w-4 mr-1" />
-                          {schedule.location.city}
-                        </div>
+
+                        {(user?.role === 'admin' || user?.role === 'manager') && schedule.staff && (
+                          <div className="mt-2 text-xs text-gray-400">
+                            Assigned to: {schedule.staff.firstName} {schedule.staff.lastName}
+                          </div>
+                        )}
                       </div>
 
-                      <div className="flex items-center space-x-2">
-                        <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${schedule.isPublished
+                      <div className="flex items-center space-x-2 mt-4">
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${schedule.isPublished
                           ? 'bg-green-100 text-green-800'
                           : 'bg-yellow-100 text-yellow-800'
                           }`}>
                           {schedule.isPublished ? 'Published' : 'Draft'}
                         </span>
-                        <span className="text-sm text-gray-600 ml-2">
+                        <span className="text-xs text-gray-400">
                           Created: {new Date(schedule.createdAt).toLocaleDateString()}
                         </span>
                       </div>

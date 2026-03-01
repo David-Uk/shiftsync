@@ -2,40 +2,29 @@ import { NextRequest, NextResponse } from 'next/server';
 import mongoose from 'mongoose';
 import Schedule from '@/models/Schedule';
 import Staff from '@/models/Staff';
-import jwt from 'jsonwebtoken';
-import User from '@/models/User';
 import { createNotificationForEvent } from '@/lib/notificationMiddleware';
-import NotificationService from '@/lib/notificationService';
+import { verifyAuth } from '@/lib/auth';
+import User from '@/models/User';
+import connectToDatabase from '@/lib/mongodb';
 
-// Helper function to verify JWT token and get user
-async function getAuthenticatedUser(request: NextRequest) {
-  try {
-    const authHeader = request.headers.get('authorization');
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return null;
-    }
 
-    const token = authHeader.substring(7);
-    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as { userId: string };
-    
-    await mongoose.connect(process.env.MONGODB_URI!);
-    const user = await User.findById(decoded.userId);
-    
-    if (!user || (user.role !== 'admin' && user.role !== 'manager' && user.role !== 'staff')) {
-      return null;
-    }
-
-    return user;
-  } catch {
-    return null;
-  }
-}
 
 // Helper function to get staff record for authenticated user
 async function getUserStaffRecord(userId: string) {
-  const staff = await Staff.findOne({ user: userId });
+  let staff = await Staff.findOne({ user: userId });
   if (!staff) {
-    throw new Error('Staff record not found for this user');
+    // Check if user exists and has a role that requires a staff record
+    const user = await User.findById(userId);
+    if (user && (user.role === 'staff' || user.role === 'manager')) {
+      staff = new Staff({
+        user: userId,
+        designation: user.designation || (user.role === 'manager' ? 'Manager' : 'Staff Member'),
+        status: 'active'
+      });
+      await staff.save();
+    } else {
+      throw new Error('Staff record not found for this user');
+    }
   }
   return staff;
 }
@@ -43,15 +32,16 @@ async function getUserStaffRecord(userId: string) {
 // GET all schedules for authenticated user
 export async function GET(request: NextRequest) {
   try {
-    const user = await getAuthenticatedUser(request);
-    if (!user) {
+    const auth = await verifyAuth(request);
+    if (auth.error) {
       return NextResponse.json(
-        { success: false, error: 'Unauthorized' },
-        { status: 401 }
+        { success: false, error: auth.error },
+        { status: auth.status }
       );
     }
+    const user = auth.user!;
 
-    await mongoose.connect(process.env.MONGODB_URI!);
+    await connectToDatabase();
     
     const { searchParams } = new URL(request.url);
     const page = parseInt(searchParams.get('page') || '1');
@@ -73,9 +63,14 @@ export async function GET(request: NextRequest) {
     } else if (user.role === 'manager' || user.role === 'admin') {
       // Managers and admins can see all schedules, or specific staff if staffId is provided
       if (staffId) {
-        filter.staff = new mongoose.Types.ObjectId(staffId);
+        const staff = await Staff.findOne({ user: staffId });
+        if (staff) {
+          filter.staff = staff._id;
+        } else {
+          // If no staff record found for this user ID, ensure no results are returned
+          filter.staff = new mongoose.Types.ObjectId(); 
+        }
       }
-      // No filter means all schedules
     }
     
     if (startDate || endDate) {
@@ -89,7 +84,6 @@ export async function GET(request: NextRequest) {
     }
     
     const schedules = await Schedule.find(filter)
-      .populate('location', 'address city timezone')
       .populate('staff', 'firstName lastName email')
       .sort({ startTime: -1 })
       .skip(skip)
@@ -117,13 +111,13 @@ export async function GET(request: NextRequest) {
     
     if (error instanceof Error && error.message === 'Staff record not found for this user') {
       return NextResponse.json(
-        { success: false, error: error.message },
+        { success: false, error: error.message, message: error.message },
         { status: 404 }
       );
     }
     
     return NextResponse.json(
-      { success: false, error: 'Failed to fetch schedules' },
+      { success: false, error: 'Failed to fetch schedules', message: 'Failed to fetch schedules' },
       { status: 500 }
     );
   }
@@ -132,54 +126,92 @@ export async function GET(request: NextRequest) {
 // POST create new schedule for authenticated staff
 export async function POST(request: NextRequest) {
   try {
-    const user = await getAuthenticatedUser(request);
-    if (!user) {
+    const auth = await verifyAuth(request);
+    if (auth.error) {
       return NextResponse.json(
-        { success: false, error: 'Unauthorized' },
-        { status: 401 }
+        { success: false, error: auth.error },
+        { status: auth.status }
       );
     }
+    const user = auth.user!;
 
-    await mongoose.connect(process.env.MONGODB_URI!);
+    await connectToDatabase();
     
     const body = await request.json();
-    const { startTime, endTime, workDays, isOneOff, oneOffDate, timezone, location, notes } = body;
+    const { 
+      staff: targetUserId, 
+      startTime, 
+      endTime, 
+      workDays, 
+      isOneOff, 
+      oneOffDate, 
+      timezone, 
+      notes 
+    } = body;
     
     // Validate required fields
-    if (!startTime || !endTime || !workDays || !Array.isArray(workDays) || workDays.length === 0 || !timezone) {
+    if (!startTime || !endTime || !timezone) {
       return NextResponse.json(
-        { success: false, error: 'Start time, end time, work days, and timezone are required' },
+        { success: false, error: 'Start time, end time, and timezone are required' },
         { status: 400 }
       );
     }
     
-    // Validate workDays values
-    const validDays = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-    const invalidDays = workDays.filter((day: string) => !validDays.includes(day));
-    if (invalidDays.length > 0) {
-      return NextResponse.json(
-        { success: false, error: `Invalid work days: ${invalidDays.join(', ')}. Use: ${validDays.join(', ')}` },
+    // Additional conditional validation
+    if (!isOneOff && (!workDays || !Array.isArray(workDays) || workDays.length === 0)) {
+       return NextResponse.json(
+        { success: false, error: 'Recurring schedules require at least one work day' },
         { status: 400 }
       );
     }
     
-    // Get staff record for this user
-    const staff = await getUserStaffRecord(user._id.toString());
+    if (isOneOff && !oneOffDate) {
+       return NextResponse.json(
+        { success: false, error: 'One-off schedules require a specific date' },
+        { status: 400 }
+      );
+    }
     
-    // Convert times to UTC if they're in local timezone
+    // Determine which staff member this schedule is for
+    let staffToSchedulesFor;
+    if (user.role === 'admin' || user.role === 'manager') {
+      if (!targetUserId) {
+        return NextResponse.json(
+          { success: false, error: 'Staff member is required' },
+          { status: 400 }
+        );
+      }
+      staffToSchedulesFor = await getUserStaffRecord(targetUserId);
+    } else {
+      // Staff member creating for themselves
+      staffToSchedulesFor = await getUserStaffRecord(user._id.toString());
+    }
+    
+    // Validate workDays values if recurring
+    if (!isOneOff && workDays) {
+      const validDays = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+      const invalidDays = workDays.filter((day: string) => !validDays.includes(day));
+      if (invalidDays.length > 0) {
+        return NextResponse.json(
+          { success: false, error: `Invalid work days: ${invalidDays.join(', ')}. Use: ${validDays.join(', ')}` },
+          { status: 400 }
+        );
+      }
+    }
+    
+    // Convert times to UTC
     const utcStartTime = new Date(startTime);
     const utcEndTime = new Date(endTime);
     
     // Create schedule data
     const scheduleData: Record<string, unknown> = {
-      staff: staff._id,
+      staff: staffToSchedulesFor._id,
       startTime: utcStartTime,
       endTime: utcEndTime,
       workDays,
       isOneOff: Boolean(isOneOff),
       timezone,
-      location,
-      notes
+      notes: notes || undefined
     };
     
     if (isOneOff && oneOffDate) {
@@ -197,39 +229,31 @@ export async function POST(request: NextRequest) {
       'schedule_published',
       {
         scheduleId: schedule._id.toString(),
-        weekStart: startTime,
-        weekEnd: endTime
+        startTime: startTime,
+        endTime: endTime,
+        isOneOff: Boolean(isOneOff)
       },
-      [user._id.toString()]
+      [staffToSchedulesFor.user.toString()]
     );
     
     return NextResponse.json({
       success: true,
-      data: schedule
+      schedule: schedule
     }, { status: 201 });
     
-  } catch (error: unknown) {
+  } catch (err: unknown) {
+    const error = err as Error;
     console.error('Error creating schedule:', error);
     
     if (error instanceof Error) {
-      if (error.message.includes('at least 10 hours')) {
-        return NextResponse.json(
-          { success: false, error: error.message },
-          { status: 400 }
-        );
-      }
-      
-      if (error.message.includes('Start time must be before end time') || 
-          error.message.includes('End time must be after start time')) {
-        return NextResponse.json(
-          { success: false, error: error.message },
-          { status: 400 }
-        );
-      }
+      return NextResponse.json(
+        { success: false, error: error.message },
+        { status: 400 }
+      );
     }
     
     return NextResponse.json(
-      { success: false, error: 'Failed to create schedule' },
+      { success: false, error: 'An unexpected error occurred' },
       { status: 500 }
     );
   }

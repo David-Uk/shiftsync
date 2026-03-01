@@ -25,6 +25,9 @@ export async function createNotificationForEvent(
     message?: string;
     weekStart?: string | Date;
     weekEnd?: string | Date;
+    startTime?: string | Date;
+    endTime?: string | Date;
+    isOneOff?: boolean;
     priority?: 'low' | 'medium' | 'high' | 'urgent';
   },
   affectedUsers?: string[]

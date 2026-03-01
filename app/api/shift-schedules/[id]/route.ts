@@ -18,7 +18,7 @@ async function getAuthenticatedUser(request: NextRequest) {
     const token = authHeader.substring(7);
     const decoded = jwt.verify(token, process.env.JWT_SECRET!) as { userId: string };
     
-    await mongoose.connect(process.env.MONGODB_URI!);
+    await mongoose.connect(process.env.MONGODB_URL!);
     const user = await User.findById(decoded.userId);
     
     if (!user || (user.role !== 'admin' && user.role !== 'manager' && user.role !== 'staff')) {
@@ -46,7 +46,7 @@ export async function GET(
       );
     }
 
-    await mongoose.connect(process.env.MONGODB_URI!);
+    await mongoose.connect(process.env.MONGODB_URL!);
     
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return NextResponse.json(
@@ -119,7 +119,7 @@ export async function PUT(
       );
     }
 
-    await mongoose.connect(process.env.MONGODB_URI!);
+    await mongoose.connect(process.env.MONGODB_URL!);
     
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return NextResponse.json(
@@ -273,7 +273,7 @@ export async function DELETE(
       );
     }
 
-    await mongoose.connect(process.env.MONGODB_URI!);
+    await mongoose.connect(process.env.MONGODB_URL!);
     
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return NextResponse.json(
