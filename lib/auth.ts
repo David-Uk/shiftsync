@@ -5,6 +5,45 @@ import connectToDatabase from '@/lib/mongodb';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'secret';
 
+export async function getAuthenticatedUser(request: NextRequest) {
+  try {
+    const authHeader = request.headers.get("authorization");
+    console.log("Auth header:", authHeader ? "Present" : "Missing");
+
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      console.log("No Bearer token found in authorization header");
+      return null;
+    }
+
+    const token = authHeader.substring(7);
+    console.log("Token extracted, length:", token.length);
+
+    try {
+      const decoded = jwt.verify(token, JWT_SECRET) as {
+        id: string;
+      };
+      console.log("Token decoded successfully, id:", decoded.id);
+
+      await connectToDatabase();
+      const user = await User.findById(decoded.id);
+      console.log("User lookup result:", user ? `Found - ${user.email}` : "Not found");
+
+      if (!user) {
+        console.log("User not found in database for id:", decoded.id);
+        return null;
+      }
+
+      console.log("Authentication successful for user:", user.email, "role:", user.role);
+      return user;
+    } catch (jwtError) {
+      console.error("JWT verification failed:", jwtError instanceof Error ? jwtError.message : String(jwtError));
+      return null;
+    }
+  } catch (error) {
+    console.error("Authentication error:", error instanceof Error ? error.message : String(error));
+    return null;
+  }
+}
 export async function verifyAuth(req: NextRequest) {
   const authHeader = req.headers.get('authorization');
   if (!authHeader || !authHeader.startsWith('Bearer ')) {

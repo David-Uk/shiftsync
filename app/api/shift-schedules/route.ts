@@ -1,38 +1,11 @@
-import connectToDatabase from "@/lib/mongodb";
+import { getAuthenticatedUser } from "@/lib/auth";
 import NotificationService from "@/lib/notificationService";
+import connectToDatabase from "@/lib/mongodb";
 import Location from "@/models/Location";
 import ShiftSchedule from "@/models/ShiftSchedule";
 import Staff from "@/models/Staff";
-import User from "@/models/User";
-import jwt from "jsonwebtoken";
 import mongoose, { Types } from "mongoose";
 import { NextRequest, NextResponse } from "next/server";
-
-// Helper function to verify JWT token and get user
-async function getAuthenticatedUser(request: NextRequest) {
-  try {
-    const authHeader = request.headers.get("authorization");
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      return null;
-    }
-
-    const token = authHeader.substring(7);
-    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as {
-      userId: string;
-    };
-
-    await connectToDatabase();
-    const user = await User.findById(decoded.userId);
-
-    if (!user || (user.role !== "admin" && user.role !== "manager")) {
-      return null;
-    }
-
-    return user;
-  } catch {
-    return null;
-  }
-}
 
 // Helper function to get staff record for user
 // async function getUserStaffRecord(userId: string) {
@@ -139,7 +112,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const user = await getAuthenticatedUser(request);
-    if (!user) {
+    if (!user || (user.role !== "admin" && user.role !== "manager")) {
       return NextResponse.json(
         { success: false, error: "Unauthorized" },
         { status: 401 },
@@ -153,6 +126,7 @@ export async function POST(request: NextRequest) {
       location,
       title,
       description,
+      designation,
       startTime,
       endTime,
       workDays,
@@ -168,6 +142,7 @@ export async function POST(request: NextRequest) {
     if (
       !location ||
       !title ||
+      !designation ||
       !startTime ||
       !endTime ||
       !workDays ||
@@ -180,7 +155,7 @@ export async function POST(request: NextRequest) {
         {
           success: false,
           error:
-            "Location, title, start time, end time, work days, timezone, and headcount are required",
+            "Location, title, designation, start time, end time, work days, timezone, and headcount are required",
         },
         { status: 400 },
       );
@@ -222,42 +197,12 @@ export async function POST(request: NextRequest) {
           { status: 404 },
         );
       }
-
-      // Use the managed location
-      body.location = managedLocation._id;
     }
 
-    // Validate assigned staff if provided
-    if (
-      assignedStaff &&
-      Array.isArray(assignedStaff) &&
-      assignedStaff.length > 0
-    ) {
-      for (const staffId of assignedStaff) {
-        const staff = await Staff.findById(staffId).populate(
-          "user",
-          "firstName lastName email designation",
-        );
-        if (!staff) {
-          return NextResponse.json(
-            { success: false, error: `Staff member not found: ${staffId}` },
-            { status: 404 },
-          );
-        }
-
-        // Check if staff has required skills (basic validation for now)
-        // This would need to be enhanced with actual skill matching
-
-        // Check if staff work hours align with shift (basic validation)
-        // This would need to be enhanced with actual work hour checking
-      }
-    }
-
-    // Create shift schedule
-    // Convert time strings (HH:MM format) to Date objects
-    const convertTimeToDate = (timeStr: string): Date => {
-      const today = new Date();
+    // Convert time strings to UTC dates
+    const convertTimeToDate = (timeStr: string) => {
       const [hours, minutes] = timeStr.split(":").map(Number);
+      const today = new Date();
       const date = new Date(
         today.getFullYear(),
         today.getMonth(),
@@ -271,11 +216,17 @@ export async function POST(request: NextRequest) {
     const startTimeDate = convertTimeToDate(startTime);
     const endTimeDate = convertTimeToDate(endTime);
 
+    // Handle overnight shifts
+    if (endTimeDate <= startTimeDate) {
+      endTimeDate.setDate(endTimeDate.getDate() + 1);
+    }
+
     const shiftScheduleData: Record<string, unknown> = {
       location,
       manager: user._id,
       title,
       description,
+      designation,
       startTime: startTimeDate,
       endTime: endTimeDate,
       workDays,
@@ -297,8 +248,8 @@ export async function POST(request: NextRequest) {
     try {
       const adminId = user._id as mongoose.Types.ObjectId;
       const shiftId = shiftSchedule._id as mongoose.Types.ObjectId;
-      const locationDoc = shiftSchedule.location as any;
-      const locationId = locationDoc._id as mongoose.Types.ObjectId;
+      const locationDoc = shiftSchedule.location as unknown as { _id: mongoose.Types.ObjectId; address?: string };
+      const locationId = locationDoc._id;
       const locationAddress = locationDoc.address || "assigned location";
 
       // 1. Notify Admins
@@ -318,8 +269,8 @@ export async function POST(request: NextRequest) {
           _id: { $in: assignedStaff },
         }).populate("user");
         const userIds = staffDocs.map((s) => {
-          const staffUser = s.user as any;
-          return staffUser._id as mongoose.Types.ObjectId;
+          const staffUser = s.user as unknown as { _id: mongoose.Types.ObjectId };
+          return staffUser._id;
         });
 
         await NotificationService.createBulkNotifications(
@@ -339,28 +290,12 @@ export async function POST(request: NextRequest) {
       console.error("Failed to send shift creation notifications:", err);
     }
 
-    return NextResponse.json(
-      {
-        success: true,
-        data: shiftSchedule,
-      },
-      { status: 201 },
-    );
+    return NextResponse.json({
+      success: true,
+      data: shiftSchedule,
+    });
   } catch (error: unknown) {
     console.error("Error creating shift schedule:", error);
-
-    if (error instanceof Error) {
-      if (
-        error.message.includes("Start time must be before end time") ||
-        error.message.includes("End time must be after start time")
-      ) {
-        return NextResponse.json(
-          { success: false, error: error.message },
-          { status: 400 },
-        );
-      }
-    }
-
     return NextResponse.json(
       { success: false, error: "Failed to create shift schedule" },
       { status: 500 },

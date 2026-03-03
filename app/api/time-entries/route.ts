@@ -14,12 +14,14 @@ async function getAuthenticatedUser(request: NextRequest) {
     }
 
     const token = authHeader.substring(7);
-    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as {
-      userId: string;
+    const jwt_secret = process.env.JWT_SECRET || "secret";
+    const decoded = jwt.verify(token, jwt_secret) as {
+      id: string;
+      role: string;
     };
 
     await connectToDatabase();
-    const user = await User.findById(decoded.userId);
+    const user = await User.findById(decoded.id);
 
     if (!user || !["admin", "manager", "user"].includes(user.role)) {
       return null;

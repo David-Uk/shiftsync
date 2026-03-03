@@ -12,6 +12,11 @@ export interface IStaff extends Document {
     | "retrenched"
     | "resigned"
     | "retired";
+  standardWorkHours?: {
+    startTime: string; // HH:mm format
+    endTime: string;   // HH:mm format
+    timezone: string;
+  };
   createdAt: Date;
   updatedAt: Date;
 }
@@ -42,6 +47,11 @@ const StaffSchema: Schema<IStaff> = new Schema(
         "retired",
       ],
       default: "active",
+    },
+    standardWorkHours: {
+      startTime: { type: String, trim: true },
+      endTime: { type: String, trim: true },
+      timezone: { type: String, trim: true, default: 'UTC' }
     },
   },
   {

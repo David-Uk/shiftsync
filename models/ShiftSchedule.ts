@@ -1,14 +1,15 @@
-import mongoose, { Schema, Document, Model, Types } from 'mongoose';
+import mongoose, { Document, Model, Schema, Types } from "mongoose";
 
 export interface IShiftSchedule extends Document {
   location: Types.ObjectId; // Reference to Location model
   manager: Types.ObjectId; // Reference to User model (manager who created it)
   title: string; // Shift title/name
   description?: string; // Shift description
+  designation: string; // Required designation for this shift
   startTime: Date; // Shift start time in UTC
   endTime: Date; // Shift end time in UTC
   workDays: string[]; // Days of week (['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'])
-  timezone: string; // Timezone for this schedule (e.g., 'UTC', 'GMT', 'EST', 'PST')
+  timezone: string; // Timezone for this schedule (e.g., 'GMT+1', 'GMT-5', 'GMT+0')
   requiredSkills: string[]; // Skills required for this shift
   headcount: number; // Number of staff needed
   assignedStaff: Types.ObjectId[]; // Array of assigned staff IDs
@@ -27,105 +28,119 @@ export interface IShiftScheduleModel extends Model<IShiftSchedule> {
 
 const ShiftScheduleSchema: Schema<IShiftSchedule> = new Schema(
   {
-    location: { 
-      type: Schema.Types.ObjectId, 
-      ref: 'Location', 
-      required: true
+    location: {
+      type: Schema.Types.ObjectId,
+      ref: "Location",
+      required: true,
     },
-    manager: { 
-      type: Schema.Types.ObjectId, 
-      ref: 'User', 
-      required: true
+    manager: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
     },
-    title: { 
-      type: String, 
+    title: {
+      type: String,
       required: true,
       trim: true,
-      maxlength: 100
+      maxlength: 100,
     },
-    description: { 
-      type: String, 
-      maxlength: 500 
+    description: {
+      type: String,
+      maxlength: 500,
     },
-    startTime: { 
-      type: Date, 
+    designation: {
+      type: String,
+      required: true,
+      trim: true,
+      lowercase: true,
+    },
+    startTime: {
+      type: Date,
       required: true,
       validate: {
-        validator: function(v: Date) {
+        validator: function (v: Date) {
           // Type guard to ensure we're working with a document
-          if ('endTime' in this) {
+          if ("endTime" in this) {
             return v < (this as IShiftSchedule).endTime;
           }
           return true;
         },
-        message: 'Start time must be before end time'
-      }
+        message: "Start time must be before end time",
+      },
     },
-    endTime: { 
-      type: Date, 
+    endTime: {
+      type: Date,
       required: true,
       validate: {
-        validator: function(v: Date) {
+        validator: function (v: Date) {
           // Type guard to ensure we're working with a document
-          if ('startTime' in this) {
+          if ("startTime" in this) {
             return v > (this as IShiftSchedule).startTime;
           }
           return true;
         },
-        message: 'End time must be after start time'
-      }
+        message: "End time must be after start time",
+      },
     },
-    workDays: [{ 
-      type: String, 
-      enum: ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'],
-      required: true
-    }],
-    timezone: { 
-      type: String, 
+    workDays: [
+      {
+        type: String,
+        enum: [
+          "Sunday",
+          "Monday",
+          "Tuesday",
+          "Wednesday",
+          "Thursday",
+          "Friday",
+          "Saturday",
+        ],
+        required: true,
+      },
+    ],
+    timezone: {
+      type: String,
       required: true,
-      validate: {
-        validator: function(v: string) {
-          // Common timezone abbreviations validation
-          const validTimezones = ['UTC', 'GMT', 'EST', 'EDT', 'CST', 'CDT', 'MST', 'MDT', 'PST', 'PDT', 'AKST', 'AKDT', 'HST', 'CEST', 'CET', 'IST', 'JST', 'AEST', 'AEDT'];
-          return validTimezones.includes(v);
-        },
-        message: 'Invalid timezone. Use standard abbreviations like UTC, GMT, EST, PST, etc.'
-      }
-    },
-    requiredSkills: [{ 
-      type: String, 
       trim: true,
-      maxlength: 50
-    }],
-    headcount: { 
-      type: Number, 
+      maxlength: 50,
+    },
+    requiredSkills: [
+      {
+        type: String,
+        trim: true,
+        maxlength: 50,
+      },
+    ],
+    headcount: {
+      type: Number,
       required: true,
       min: 1,
-      max: 50
+      max: 50,
     },
-    assignedStaff: [{ 
-      type: Schema.Types.ObjectId, 
-      ref: 'Staff'
-    }],
-    isActive: { 
-      type: Boolean, 
+    assignedStaff: [
+      {
+        type: Schema.Types.ObjectId,
+        ref: "Staff",
+      },
+    ],
+    isActive: {
+      type: Boolean,
       required: true,
-      default: true
+      default: true,
     },
-    startDate: { 
-      type: Date, 
+    startDate: {
+      type: Date,
       required: true,
-      default: Date.now
+      default: Date.now,
     },
-    endDate: { 
-      type: Date
+    endDate: {
+      type: Date,
     },
   },
-  { 
+  {
     timestamps: true,
     toJSON: { virtuals: true },
-    toObject: { virtuals: true }
-  }
+    toObject: { virtuals: true },
+  },
 );
 
 // Indexes for better query performance
@@ -136,69 +151,73 @@ ShiftScheduleSchema.index({ isActive: 1, workDays: 1 });
 ShiftScheduleSchema.index({ startDate: 1, endDate: 1 });
 
 // Virtual for getting location details
-ShiftScheduleSchema.virtual('locationDetails', {
-  ref: 'Location',
-  localField: 'location',
-  foreignField: '_id',
-  justOne: true
+ShiftScheduleSchema.virtual("locationDetails", {
+  ref: "Location",
+  localField: "location",
+  foreignField: "_id",
+  justOne: true,
 });
 
 // Virtual for getting manager details
-ShiftScheduleSchema.virtual('managerDetails', {
-  ref: 'User',
-  localField: 'manager',
-  foreignField: '_id',
-  justOne: true
+ShiftScheduleSchema.virtual("managerDetails", {
+  ref: "User",
+  localField: "manager",
+  foreignField: "_id",
+  justOne: true,
 });
 
 // Virtual for getting assigned staff details
-ShiftScheduleSchema.virtual('assignedStaffDetails', {
-  ref: 'Staff',
-  localField: 'assignedStaff',
-  foreignField: '_id'
+ShiftScheduleSchema.virtual("assignedStaffDetails", {
+  ref: "Staff",
+  localField: "assignedStaff",
+  foreignField: "_id",
 });
 
 // Pre-save middleware to validate and set location
-ShiftScheduleSchema.pre('save', async function(this: IShiftSchedule) {
-  if (this.isNew || this.isModified('location')) {
+ShiftScheduleSchema.pre("save", async function (this: IShiftSchedule) {
+  if (this.isNew || this.isModified("location")) {
     try {
       // Get manager details
-      const User = mongoose.model('User');
+      const User = mongoose.model("User");
       const manager = await User.findById(this.manager);
-      
+
       if (!manager) {
-        const error = new Error('Manager not found');
+        const error = new Error("Manager not found");
         throw error;
       }
-      
+
       // Get all locations managed by this manager
-      const Location = mongoose.model('Location');
+      const Location = mongoose.model("Location");
       const managedLocations = await Location.find({ manager: this.manager });
-      
+
       // Check if the selected location is managed by this manager
       const isManagedLocation = managedLocations.some(
-        (loc: { _id: Types.ObjectId }) => loc._id.toString() === this.location.toString()
+        (loc: { _id: Types.ObjectId }) =>
+          loc._id.toString() === this.location.toString(),
       );
-      
+
       if (!isManagedLocation) {
-        const error = new Error('Location is not managed by this manager');
+        const error = new Error("Location is not managed by this manager");
         throw error;
       }
-      
+
       // Validate assigned staff if provided
       if (this.assignedStaff && this.assignedStaff.length > 0) {
-        const Staff = mongoose.model('Staff');
-        
+        const Staff = mongoose.model("Staff");
+
         for (const staffId of this.assignedStaff) {
-          const staff = await Staff.findById(staffId).populate('user', 'firstName lastName email designation');
+          const staff = await Staff.findById(staffId).populate(
+            "user",
+            "firstName lastName email designation",
+          );
           if (!staff) {
             const error = new Error(`Assigned staff not found: ${staffId}`);
             throw error;
           }
-          
+
           // Check if staff has required skills (basic validation for now)
           // This would need to be enhanced with actual skill matching
-          
+
           // Check if staff work hours align with shift (basic validation)
           // This would need to be enhanced with actual work hour checking
         }
@@ -210,77 +229,112 @@ ShiftScheduleSchema.pre('save', async function(this: IShiftSchedule) {
 });
 
 // Static method to convert UTC time to local timezone
-ShiftScheduleSchema.statics.toLocalTime = function(utcDate: Date, timezone: string): Date {
-  // Map timezone abbreviations to IANA timezone names
+ShiftScheduleSchema.statics.toLocalTime = function (
+  utcDate: Date,
+  timezone: string,
+): Date {
+  // Map GMT format to IANA timezone names
   const timezoneMap: Record<string, string> = {
-    'UTC': 'UTC',
-    'GMT': 'GMT',
-    'EST': 'America/New_York',
-    'EDT': 'America/New_York',
-    'CST': 'America/Chicago',
-    'CDT': 'America/Chicago',
-    'MST': 'America/Denver',
-    'MDT': 'America/Denver',
-    'PST': 'America/Los_Angeles',
-    'PDT': 'America/Los_Angeles',
-    'AKST': 'America/Anchorage',
-    'AKDT': 'America/Anchorage',
-    'HST': 'Pacific/Honolulu',
-    'CEST': 'Europe/Paris',
-    'CET': 'Europe/Paris',
-    'IST': 'Asia/Kolkata',
-    'JST': 'Asia/Tokyo',
-    'AEST': 'Australia/Sydney',
-    'AEDT': 'Australia/Sydney'
+    GMT: "UTC",
+    "GMT+0": "UTC",
+    "GMT+1": "Etc/GMT-1",
+    "GMT+2": "Etc/GMT-2",
+    "GMT+3": "Etc/GMT-3",
+    "GMT+4": "Etc/GMT-4",
+    "GMT+5": "Etc/GMT-5",
+    "GMT+6": "Etc/GMT-6",
+    "GMT+7": "Etc/GMT-7",
+    "GMT+8": "Etc/GMT-8",
+    "GMT+9": "Etc/GMT-9",
+    "GMT+10": "Etc/GMT-10",
+    "GMT+11": "Etc/GMT-11",
+    "GMT+12": "Etc/GMT-12",
+    "GMT+13": "Etc/GMT-13",
+    "GMT+14": "Etc/GMT-14",
+    "GMT-1": "Etc/GMT+1",
+    "GMT-2": "Etc/GMT+2",
+    "GMT-3": "Etc/GMT+3",
+    "GMT-4": "Etc/GMT+4",
+    "GMT-5": "Etc/GMT+5",
+    "GMT-6": "Etc/GMT+6",
+    "GMT-7": "Etc/GMT+7",
+    "GMT-8": "Etc/GMT+8",
+    "GMT-9": "Etc/GMT+9",
+    "GMT-10": "Etc/GMT+10",
+    "GMT-11": "Etc/GMT+11",
+    "GMT-12": "Etc/GMT+12",
   };
-  
-  const ianaTimezone = timezoneMap[timezone] || 'UTC';
+
+  const ianaTimezone = timezoneMap[timezone] || "UTC";
   return new Date(utcDate.toLocaleString("en-US", { timeZone: ianaTimezone }));
 };
 
 // Static method to convert local time to UTC
-ShiftScheduleSchema.statics.toUTC = function(localDate: Date, timezone: string): Date {
-  // Map timezone abbreviations to IANA timezone names
+ShiftScheduleSchema.statics.toUTC = function (
+  localDate: Date,
+  timezone: string,
+): Date {
+  // Map GMT format to IANA timezone names
   const timezoneMap: Record<string, string> = {
-    'UTC': 'UTC',
-    'GMT': 'GMT',
-    'EST': 'America/New_York',
-    'EDT': 'America/New_York',
-    'CST': 'America/Chicago',
-    'CDT': 'America/Chicago',
-    'MST': 'America/Denver',
-    'MDT': 'America/Denver',
-    'PST': 'America/Los_Angeles',
-    'PDT': 'America/Los_Angeles',
-    'AKST': 'America/Anchorage',
-    'AKDT': 'America/Anchorage',
-    'HST': 'Pacific/Honolulu',
-    'CEST': 'Europe/Paris',
-    'CET': 'Europe/Paris',
-    'IST': 'Asia/Kolkata',
-    'JST': 'Asia/Tokyo',
-    'AEST': 'Australia/Sydney',
-    'AEDT': 'Australia/Sydney'
+    GMT: "UTC",
+    "GMT+0": "UTC",
+    "GMT+1": "Etc/GMT-1",
+    "GMT+2": "Etc/GMT-2",
+    "GMT+3": "Etc/GMT-3",
+    "GMT+4": "Etc/GMT-4",
+    "GMT+5": "Etc/GMT-5",
+    "GMT+6": "Etc/GMT-6",
+    "GMT+7": "Etc/GMT-7",
+    "GMT+8": "Etc/GMT-8",
+    "GMT+9": "Etc/GMT-9",
+    "GMT+10": "Etc/GMT-10",
+    "GMT+11": "Etc/GMT-11",
+    "GMT+12": "Etc/GMT-12",
+    "GMT+13": "Etc/GMT-13",
+    "GMT+14": "Etc/GMT-14",
+    "GMT-1": "Etc/GMT+1",
+    "GMT-2": "Etc/GMT+2",
+    "GMT-3": "Etc/GMT+3",
+    "GMT-4": "Etc/GMT+4",
+    "GMT-5": "Etc/GMT+5",
+    "GMT-6": "Etc/GMT+6",
+    "GMT-7": "Etc/GMT+7",
+    "GMT-8": "Etc/GMT+8",
+    "GMT-9": "Etc/GMT+9",
+    "GMT-10": "Etc/GMT+10",
+    "GMT-11": "Etc/GMT+11",
+    "GMT-12": "Etc/GMT+12",
   };
-  
-  const ianaTimezone = timezoneMap[timezone] || 'UTC';
-  const tzDate = new Date(localDate.toLocaleString("en-US", { timeZone: ianaTimezone }));
+
+  const ianaTimezone = timezoneMap[timezone] || "UTC";
+  const tzDate = new Date(
+    localDate.toLocaleString("en-US", { timeZone: ianaTimezone }),
+  );
   const utcDate = new Date(tzDate.toLocaleString("en-US", { timeZone: "UTC" }));
   return utcDate;
 };
 
 // Instance method to get shift schedule in local timezone
-ShiftScheduleSchema.methods.toLocalShiftSchedule = function(this: IShiftSchedule): Record<string, unknown> {
+ShiftScheduleSchema.methods.toLocalShiftSchedule = function (
+  this: IShiftSchedule,
+): Record<string, unknown> {
   const ShiftScheduleModel = this.constructor as unknown as IShiftScheduleModel;
   return {
     ...this.toObject(),
     startTime: ShiftScheduleModel.toLocalTime(this.startTime, this.timezone),
     endTime: ShiftScheduleModel.toLocalTime(this.endTime, this.timezone),
     startDate: ShiftScheduleModel.toLocalTime(this.startDate, this.timezone),
-    endDate: this.endDate ? ShiftScheduleModel.toLocalTime(this.endDate, this.timezone) : undefined,
+    endDate: this.endDate
+      ? ShiftScheduleModel.toLocalTime(this.endDate, this.timezone)
+      : undefined,
   };
 };
 
-const ShiftSchedule: IShiftScheduleModel = (mongoose.models.ShiftSchedule as IShiftScheduleModel) || mongoose.model<IShiftSchedule>('ShiftSchedule', ShiftScheduleSchema) as IShiftScheduleModel;
+const ShiftSchedule: IShiftScheduleModel =
+  (mongoose.models.ShiftSchedule as IShiftScheduleModel) ||
+  (mongoose.model<IShiftSchedule>(
+    "ShiftSchedule",
+    ShiftScheduleSchema,
+  ) as IShiftScheduleModel);
 
 export default ShiftSchedule;

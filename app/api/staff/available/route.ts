@@ -1,60 +1,15 @@
+import { getAuthenticatedUser } from "@/lib/auth";
 import connectToDatabase from "@/lib/mongodb";
-import Schedule from "@/models/Schedule";
 import ShiftSchedule from "@/models/ShiftSchedule";
+import Schedule from "@/models/Schedule";
 import Staff from "@/models/Staff";
-import User from "@/models/User";
-import jwt from "jsonwebtoken";
+import Location from "@/models/Location";
 import { NextRequest, NextResponse } from "next/server";
-
-async function getAuthenticatedUser(request: NextRequest) {
-  try {
-    const authHeader = request.headers.get("authorization");
-    console.log("Auth header:", authHeader ? "Present" : "Missing");
-
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      console.log("No Bearer token found");
-      return null;
-    }
-
-    const token = authHeader.substring(7);
-    console.log("Token length:", token.length);
-
-    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as {
-      userId: string;
-    };
-    console.log("Token decoded, userId:", decoded.userId);
-
-    await connectToDatabase();
-    const user = await User.findById(decoded.userId);
-    console.log("User found:", user ? "Yes" : "No");
-    console.log("User role:", user?.role);
-
-    if (!user) {
-      console.log("User not found in database");
-      return null;
-    }
-
-    // Temporarily allow all authenticated users for debugging
-    console.log("User role:", user?.role, "- allowing access for debugging");
-
-    // Original role check - uncomment after debugging
-    // if (user.role !== "manager" && user.role !== "admin") {
-    //   console.log('Authentication failed - user role:', user.role);
-    //   return null;
-    // }
-
-    console.log("Authentication successful for role:", user?.role);
-    return user;
-  } catch (error) {
-    console.error("Authentication error:", error);
-    return null;
-  }
-}
 
 export async function GET(request: NextRequest) {
   try {
     const user = await getAuthenticatedUser(request);
-    if (!user) {
+    if (!user || (user.role !== "admin" && user.role !== "manager")) {
       return NextResponse.json(
         { success: false, error: "Unauthorized" },
         { status: 401 },
@@ -64,224 +19,204 @@ export async function GET(request: NextRequest) {
     await connectToDatabase();
 
     const { searchParams } = new URL(request.url);
-    const location = searchParams.get("location");
-    const startTime = searchParams.get("startTime");
-    const endTime = searchParams.get("endTime");
+    const startTime = searchParams.get("startTime"); // HH:mm
+    const endTime = searchParams.get("endTime");     // HH:mm
     const workDaysStr = searchParams.get("workDays");
     const designation = searchParams.get("designation");
+    const locationId = searchParams.get("location");
 
-    console.log("Available staff request params:", {
-      location,
-      startTime,
-      endTime,
-      workDays: workDaysStr,
-      designation,
-      userRole: user.role,
-    });
-
-    // Validate required parameters - location is optional now
-    if (!startTime || !endTime || !workDaysStr) {
+    if (!startTime || !endTime || !workDaysStr || !designation || !locationId) {
       return NextResponse.json(
         {
           success: false,
-          error: "startTime, endTime, and workDays are required",
+          error: "startTime, endTime, workDays, designation, and location are required",
         },
         { status: 400 },
       );
     }
 
     const workDays = workDaysStr.split(",").map((d) => d.trim());
-
-    // Helper function to extract time of day from time string (HH:MM format)
-    const getTimeOfDay = (timeStr: string): number => {
-      const [hours, minutes] = timeStr.split(":").map(Number);
-      return hours * 60 + minutes; // Convert to minutes for easier comparison
-    };
-
-    // Helper function to check if two time ranges overlap
-    const timeRangesOverlap = (
-      start1: number,
-      end1: number,
-      start2: number,
-      end2: number,
-    ): boolean => {
-      // Two ranges overlap if one starts before the other ends
-      return start1 < end2 && start2 < end1;
-    };
-
-    const shiftStartMinutes = getTimeOfDay(startTime);
-    const shiftEndMinutes = getTimeOfDay(endTime);
-
-    // Fetch all staff members - filter by designation if provided
-    const staffQuery: { status: string; designation?: string } = {
-      status: "active",
-    };
-    if (designation) {
-      staffQuery.designation = designation;
+    const location = await Location.findById(locationId);
+    if (!location) {
+      return NextResponse.json({ success: false, error: "Location not found" }, { status: 404 });
     }
 
-    console.log("Staff query:", staffQuery);
+    const shiftTimezone = location.timezone;
 
-    const allStaff = await Staff.find(staffQuery)
-      .populate("user", "firstName lastName email role")
-      .lean()
-      .sort({ "user.firstName": 1 });
+    // Helper: Convert HH:mm to Date (today) in specific timezone
+    const parseTimeToDate = (timeStr: string, date: Date = new Date()) => {
+      const [hours, minutes] = timeStr.split(":").map(Number);
+      const d = new Date(date);
+      d.setHours(hours, minutes, 0, 0);
+      return d;
+    };
 
-    console.log("Found staff count:", allStaff.length);
+    const requestedStartTime = parseTimeToDate(startTime);
+    const requestedEndTime = parseTimeToDate(endTime);
+    const endTimeCopy = new Date(requestedEndTime);
+    if (endTimeCopy <= requestedStartTime) {
+      endTimeCopy.setDate(endTimeCopy.getDate() + 1);
+    }
 
-    // Filter staff that have schedules fitting the shift time/days
+    // Fetch all active staff with matching designation
+    const allStaff = await Staff.find({
+      status: "active",
+      designation: { $regex: new RegExp(`^${designation}$`, "i") },
+    }).populate("user", "firstName lastName").lean();
+
     const availableStaff = [];
     const unavailableStaff = [];
 
-    for (const staff of allStaff) {
-      // Get staff's published schedules
-      const staffSchedules = await Schedule.find({
-        staff: staff._id,
-        isPublished: true,
-      });
+    // Fetch existing assignments for conflict and rest-period checks
+    const existingShiftSchedules = await ShiftSchedule.find({
+      isActive: true,
+      workDays: { $in: workDays }
+    }).lean();
 
-      // Check if staff has schedules on the required work days
-      let hasScheduleOnWorkDays = false;
-      let schedulesFitTimeSlot = true;
+    const existingSchedules = await Schedule.find({
+      isPublished: true,
+      $or: [
+        { isOneOff: false, workDays: { $in: workDays } },
+        { isOneOff: true }
+      ]
+    }).lean();
 
-      for (const schedule of staffSchedules) {
-        const scheduleWorkDays = schedule.workDays || [];
+    interface StaffWithWorkHours {
+      _id: string;
+      user: { firstName: string; lastName: string };
+      standardWorkHours?: {
+        startTime: string;
+        endTime: string;
+        timezone: string;
+      };
+      designation: string;
+    }
 
-        // Check if schedule covers the required work days
-        const coveringDays = workDays.filter((day) =>
-          scheduleWorkDays.includes(day),
-        );
+    for (const staff of allStaff as unknown as StaffWithWorkHours[]) {
+      const staffIdStr = staff._id.toString();
+      let isAvailable = true;
+      let reason = "";
+      const conflicts: Array<{
+        locationName: string;
+        startTime: Date;
+        endTime: Date;
+        workDays: string[];
+      }> = [];
 
-        if (coveringDays.length > 0) {
-          hasScheduleOnWorkDays = true;
+      // 1. Check Standard Work Hours (if defined)
+      if (staff.standardWorkHours && staff.standardWorkHours.startTime) {
+        // Convert staff's work hours to shift's timezone
+        const staffTz = staff.standardWorkHours.timezone || 'UTC';
+        
+        const staffLocalStart = parseTimeToDate(staff.standardWorkHours.startTime);
+        const staffLocalEnd = parseTimeToDate(staff.standardWorkHours.endTime);
+        if (staffLocalEnd <= staffLocalStart) staffLocalEnd.setDate(staffLocalEnd.getDate() + 1);
 
-          // For recurring schedules, check time fit
-          if (!schedule.isOneOff && schedule.startTime && schedule.endTime) {
-            // Extract time of day from schedule times
-            const scheduleStartStr =
-              schedule.startTime instanceof Date
-                ? schedule.startTime.toTimeString().slice(0, 5)
-                : String(schedule.startTime).padStart(5, "0");
-            const scheduleEndStr =
-              schedule.endTime instanceof Date
-                ? schedule.endTime.toTimeString().slice(0, 5)
-                : String(schedule.endTime).padStart(5, "0");
+        const ShiftScheduleModel = ShiftSchedule as any; // Using any for static call if TS is being difficult, but ideally we'd have the type
+        const staffUtcStart = ShiftScheduleModel.toUTC(staffLocalStart, staffTz);
+        const staffUtcEnd = ShiftScheduleModel.toUTC(staffLocalEnd, staffTz);
+        
+        const shiftLocalAvailableStart = ShiftScheduleModel.toLocalTime(staffUtcStart, shiftTimezone);
+        const shiftLocalAvailableEnd = ShiftScheduleModel.toLocalTime(staffUtcEnd, shiftTimezone);
 
-            const scheduleStartMinutes = getTimeOfDay(scheduleStartStr);
-            const scheduleEndMinutes = getTimeOfDay(scheduleEndStr);
+        const shiftFits = (requestedStartTime.getHours() * 60 + requestedStartTime.getMinutes()) >= (shiftLocalAvailableStart.getHours() * 60 + shiftLocalAvailableStart.getMinutes()) &&
+                          (endTimeCopy.getHours() * 60 + endTimeCopy.getMinutes()) <= (shiftLocalAvailableEnd.getHours() * 60 + shiftLocalAvailableEnd.getMinutes());
 
-            // Check if shift time fits within schedule time window
-            // Staff schedule should start before or at shift start time
-            // and end after or at shift end time
-            if (
-              scheduleStartMinutes > shiftStartMinutes ||
-              scheduleEndMinutes < shiftEndMinutes
-            ) {
-              schedulesFitTimeSlot = false;
+        if (!shiftFits) {
+          isAvailable = false;
+          reason = `Work hours mismatch (${staff.standardWorkHours.startTime}-${staff.standardWorkHours.endTime} ${staffTz})`;
+        }
+      }
+
+      if (!isAvailable) {
+        unavailableStaff.push({ ...staff, status: "schedule_mismatch", reason });
+        continue;
+      }
+
+      // 2. Check Overlaps and 10-hour Rest Rule in ShiftSchedules
+      for (const schedule of existingShiftSchedules) {
+        const assignedStaffStrings = schedule.assignedStaff.map(id => id.toString());
+        if (assignedStaffStrings.includes(staffIdStr)) {
+          const sStart = schedule.startTime;
+          const sEnd = schedule.endTime;
+          
+          if (requestedStartTime < sEnd && endTimeCopy > sStart) {
+            isAvailable = false;
+            reason = "Overlapping shift assignment";
+            conflicts.push({
+              locationName: (schedule.location as any)?.city || "Assigned Location",
+              startTime: sStart,
+              endTime: sEnd,
+              workDays: schedule.workDays
+            });
+            break;
+          }
+
+          const gapBefore = (requestedStartTime.getTime() - sEnd.getTime()) / (1000 * 60 * 60);
+          const gapAfter = (sStart.getTime() - endTimeCopy.getTime()) / (1000 * 60 * 60);
+          
+          if ((gapBefore > 0 && gapBefore < 10) || (gapAfter > 0 && gapAfter < 10)) {
+            isAvailable = false;
+            reason = "10-hour rest rule violation";
+            conflicts.push({
+              locationName: (schedule.location as any)?.city || "Assigned Location",
+              startTime: sStart,
+              endTime: sEnd,
+              workDays: schedule.workDays
+            });
+            break;
+          }
+        }
+      }
+
+      // 3. Check Overlaps and 10-hour Rest Rule in general Schedules
+      if (isAvailable) {
+        for (const schedule of existingSchedules) {
+          if (schedule.staff.toString() === staffIdStr) {
+            const sStart = schedule.startTime;
+            const sEnd = schedule.endTime;
+            
+            if (requestedStartTime < sEnd && endTimeCopy > sStart) {
+              isAvailable = false;
+              reason = "Overlapping personal schedule";
+              conflicts.push({
+                locationName: "Personal Schedule",
+                startTime: sStart,
+                endTime: sEnd,
+                workDays: schedule.workDays
+              });
+              break;
+            }
+
+            const gapBefore = (requestedStartTime.getTime() - sEnd.getTime()) / (1000 * 60 * 60);
+            const gapAfter = (sStart.getTime() - endTimeCopy.getTime()) / (1000 * 60 * 60);
+            
+            if ((gapBefore > 0 && gapBefore < 10) || (gapAfter > 0 && gapAfter < 10)) {
+              isAvailable = false;
+              reason = "10-hour rest rule violation (Personal)";
+              conflicts.push({
+                locationName: "Personal Schedule",
+                startTime: sStart,
+                endTime: sEnd,
+                workDays: schedule.workDays
+              });
               break;
             }
           }
         }
       }
 
-      // Check if staff is assigned to shifts at any location with overlapping times
-      const existingShiftAssignments = await ShiftSchedule.find({
-        assignedStaff: staff._id,
-        isActive: true,
-        location: { $ne: location }, // Different location
-      }).populate("location", "name address");
-
-      // Check for time conflicts with other location assignments
-      let hasTimeConflict = false;
-      const conflictingAssignments = [];
-
-      for (const assignment of existingShiftAssignments) {
-        // Check if any of the required work days overlap with assignment days
-        const dayOverlap = workDays.some((day) =>
-          assignment.workDays.includes(day),
-        );
-
-        if (dayOverlap) {
-          // Get assignment times
-          const assignmentStartStr =
-            assignment.startTime instanceof Date
-              ? assignment.startTime.toTimeString().slice(0, 5)
-              : String(assignment.startTime).padStart(5, "0");
-          const assignmentEndStr =
-            assignment.endTime instanceof Date
-              ? assignment.endTime.toTimeString().slice(0, 5)
-              : String(assignment.endTime).padStart(5, "0");
-
-          const assignmentStartMinutes = getTimeOfDay(assignmentStartStr);
-          const assignmentEndMinutes = getTimeOfDay(assignmentEndStr);
-
-          // Check if time ranges overlap
-          if (
-            timeRangesOverlap(
-              shiftStartMinutes,
-              shiftEndMinutes,
-              assignmentStartMinutes,
-              assignmentEndMinutes,
-            )
-          ) {
-            hasTimeConflict = true;
-            const locationData = assignment.location as any;
-            conflictingAssignments.push({
-              locationName:
-                locationData?.name || locationData?.address || "Unknown",
-              startTime: assignmentStartStr,
-              endTime: assignmentEndStr,
-              workDays: assignment.workDays,
-            });
-          }
-        }
-      }
-
-      // Only add to available if no conflicts and has required schedule
-      if (hasScheduleOnWorkDays && schedulesFitTimeSlot && !hasTimeConflict) {
-        availableStaff.push({
-          ...staff,
-          status: "available",
-          currentAssignments: existingShiftAssignments.map((assignment) => ({
-            location: assignment.location,
-            startTime: assignment.startTime,
-            endTime: assignment.endTime,
-            workDays: assignment.workDays,
-          })),
-        });
-      } else if (hasScheduleOnWorkDays) {
-        // Staff has valid schedule but is unavailable (not conflicting with other location)
-        unavailableStaff.push({
-          ...staff,
-          status: hasTimeConflict ? "conflict" : "schedule_mismatch",
-          reason: hasTimeConflict
-            ? "Assigned to another location with overlapping times"
-            : "Schedule doesn't match the required shift times",
-          conflictingAssignments,
-          currentAssignments: existingShiftAssignments.map((assignment) => ({
-            location: assignment.location,
-            startTime: assignment.startTime,
-            endTime: assignment.endTime,
-            workDays: assignment.workDays,
-          })),
-        });
+      if (isAvailable) {
+        availableStaff.push({ ...staff, status: "available" });
+      } else {
+        unavailableStaff.push({ ...staff, status: "conflict", reason, conflictingAssignments: conflicts });
       }
     }
 
-    console.log("Available staff count:", availableStaff.length);
-    console.log("Available staff details count:", availableStaff.length);
-    console.log("Unavailable staff count:", unavailableStaff.length);
-
     return NextResponse.json({
       success: true,
-      data: {
-        available: availableStaff,
-        unavailable: unavailableStaff,
-      },
-      count: {
-        available: availableStaff.length,
-        unavailable: unavailableStaff.length,
-      },
+      data: { available: availableStaff, unavailable: unavailableStaff },
+      count: { available: availableStaff.length, unavailable: unavailableStaff.length },
     });
   } catch (error: unknown) {
     console.error("Error fetching available staff:", error);

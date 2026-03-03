@@ -1,42 +1,12 @@
+import { getAuthenticatedUser } from "@/lib/auth";
 import connectToDatabase from "@/lib/mongodb";
 import NotificationService from "@/lib/notificationService";
 import ShiftSchedule from "@/models/ShiftSchedule";
 import Staff from "@/models/Staff";
-import User from "@/models/User";
-import jwt from "jsonwebtoken";
 import mongoose from "mongoose";
 import { NextRequest, NextResponse } from "next/server";
 
-// Helper function to verify JWT token and get user
-async function getAuthenticatedUser(request: NextRequest) {
-  try {
-    const authHeader = request.headers.get("authorization");
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      return null;
-    }
-
-    const token = authHeader.substring(7);
-    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as {
-      userId: string;
-    };
-
-    await connectToDatabase();
-    const user = await User.findById(decoded.userId);
-
-    if (
-      !user ||
-      (user.role !== "admin" &&
-        user.role !== "manager" &&
-        user.role !== "staff")
-    ) {
-      return null;
-    }
-
-    return user;
-  } catch {
-    return null;
-  }
-}
+// GET shift schedule by ID
 
 // GET shift schedule by ID
 export async function GET(
@@ -91,7 +61,7 @@ export async function GET(
       if (
         !staff ||
         !shiftSchedule.assignedStaff.some(
-          (s: any) => s._id.toString() === staff._id.toString(),
+          (s: mongoose.Types.ObjectId) => s.toString() === staff._id.toString(),
         )
       ) {
         return NextResponse.json(
@@ -104,7 +74,7 @@ export async function GET(
     // Convert to local timezone if requested
     const { searchParams } = new URL(request.url);
     const timezone = searchParams.get("timezone");
-    const processedSchedule = timezone
+    const processedSchedule = (timezone && typeof shiftSchedule.toLocalShiftSchedule === 'function')
       ? shiftSchedule.toLocalShiftSchedule()
       : shiftSchedule;
 
@@ -231,8 +201,8 @@ export async function PUT(
     try {
       const adminId = user._id as mongoose.Types.ObjectId;
       const shiftId = shiftSchedule._id as mongoose.Types.ObjectId;
-      const locationDoc = shiftSchedule.location as any;
-      const locationId = locationDoc._id as mongoose.Types.ObjectId;
+      const locationDoc = shiftSchedule.location as { _id: mongoose.Types.ObjectId; address?: string };
+      const locationId = locationDoc._id;
       const locationAddress = locationDoc.address || "assigned location";
 
       // 1. Notify Admins
@@ -256,10 +226,10 @@ export async function PUT(
         }).populate("user");
         const userIds = staffDocs
           .map((s) => {
-            const staffUser = s.user as any;
-            return staffUser?._id as mongoose.Types.ObjectId;
+            const staffUser = s.user as { _id: mongoose.Types.ObjectId };
+            return staffUser?._id;
           })
-          .filter(Boolean);
+          .filter((id): id is mongoose.Types.ObjectId => !!id);
 
         if (userIds.length > 0) {
           await NotificationService.createBulkNotifications(
@@ -377,10 +347,10 @@ export async function DELETE(
         }).populate("user");
         const userIds = staffDocs
           .map((s) => {
-            const staffUser = s.user as any;
-            return staffUser?._id as mongoose.Types.ObjectId;
+            const staffUser = s.user as { _id: mongoose.Types.ObjectId };
+            return staffUser?._id;
           })
-          .filter(Boolean);
+          .filter((id): id is mongoose.Types.ObjectId => !!id);
 
         if (userIds.length > 0) {
           await NotificationService.createBulkNotifications(
