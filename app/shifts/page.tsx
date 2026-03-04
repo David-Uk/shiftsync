@@ -6,7 +6,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useNotifications } from '@/contexts/NotificationContext';
 import { Calendar, Clock, MapPin, Plus, Search } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 interface Shift {
   _id: string;
@@ -50,67 +50,111 @@ export default function MyShiftsPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [showShiftModal, setShowShiftModal] = useState(false);
 
+  const fetchShifts = useCallback(async () => {
+    try {
+      setLoading(true);
+      const token = localStorage.getItem('token');
+      if (!token) {
+        setLoading(false);
+        return;
+      }
+
+      const params = new URLSearchParams({
+        filter,
+        search: searchTerm
+      });
+
+      // Use different endpoint based on view
+      const endpoint = view === 'my' ? '/api/my-shifts' : '/api/shift-schedules';
+      
+      const response = await fetch(`${endpoint}?${params}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setShifts(Array.isArray(data.data) ? data.data : []);
+      } else {
+        setShifts([]);
+      }
+    } catch (error) {
+      console.error('Error fetching shifts:', error);
+      setShifts([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [filter, searchTerm, view]);
+
   useEffect(() => {
     if (!isAuthenticated) {
       router.push('/auth/login');
       return;
     }
 
-    const fetchShifts = async () => {
-      try {
-        setLoading(true);
-        const token = localStorage.getItem('token');
-        if (!token) {
-          setLoading(false);
-          return;
-        }
-
-        const params = new URLSearchParams({
-          filter,
-          search: searchTerm
-        });
-
-        // Use different endpoint based on view
-        const endpoint = view === 'my' ? '/api/my-shifts' : '/api/shift-schedules';
-        
-        const response = await fetch(`${endpoint}?${params}`, {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          },
-        });
-
-        if (response.ok) {
-          const data = await response.json();
-          setShifts(Array.isArray(data.data) ? data.data : []);
-        } else {
-          setShifts([]);
-        }
-      } catch (error) {
-        console.error('Error fetching shifts:', error);
-        setShifts([]);
-      } finally {
-        setLoading(false);
-      }
-    };
-
     fetchShifts();
-  }, [isAuthenticated, filter, searchTerm, view, router]);
+  }, [isAuthenticated, fetchShifts, router]);
 
   const filteredShifts = shifts.filter(shift => {
-    const addressMatch = shift.location.address.toLowerCase().includes(searchTerm.toLowerCase());
-    const cityMatch = shift.location.city.toLowerCase().includes(searchTerm.toLowerCase());
+    const addressMatch = shift.location.address?.toLowerCase().includes(searchTerm.toLowerCase());
+    const cityMatch = shift.location.city?.toLowerCase().includes(searchTerm.toLowerCase());
     const titleMatch = shift.title?.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesSearch = addressMatch || cityMatch || titleMatch;
 
+    const today = new Date();
+    const todayDay = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+
+    // Recurring shifts logic
+    const isRecurring = shift.workDays && shift.workDays.length > 0;
+    const endDate = shift.endDate ? new Date(shift.endDate) : null;
+    const endDay = endDate ? new Date(endDate.getFullYear(), endDate.getMonth(), endDate.getDate()) : null;
+
     if (filter === 'upcoming') {
-      return matchesSearch && new Date(shift.startTime) > new Date();
+      if (isRecurring) {
+        // Show if recurring hasn't ended yet
+        return matchesSearch && (!endDay || endDay >= todayDay);
+      }
+      // One-off shift logic (using startTime as date)
+      const shiftDate = new Date(shift.startTime);
+      const shiftDay = new Date(shiftDate.getFullYear(), shiftDate.getMonth(), shiftDate.getDate());
+      return matchesSearch && shiftDay >= todayDay;
     } else if (filter === 'past') {
-      return matchesSearch && new Date(shift.startTime) <= new Date();
+      if (isRecurring) {
+        // Show if recurring has ended
+        return matchesSearch && endDay && endDay < todayDay;
+      }
+      const shiftDate = new Date(shift.startTime);
+      const shiftDay = new Date(shiftDate.getFullYear(), shiftDate.getMonth(), shiftDate.getDate());
+      return matchesSearch && shiftDay < todayDay;
     }
 
     return matchesSearch;
   });
+
+  const getShiftStatus = (shift: Shift) => {
+    const now = new Date();
+    const startTime = new Date(shift.startTime);
+    const endTime = new Date(shift.endTime);
+    
+    // For status display, we use exact times if it's today
+    const shiftDay = new Date(startTime.getFullYear(), startTime.getMonth(), startTime.getDate());
+    const todayDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    
+    const isToday = shiftDay.getTime() === todayDay.getTime();
+    
+    if (startTime > now) return { label: 'Upcoming', color: 'bg-green-50 text-green-600' };
+    if (isToday && startTime <= now && endTime >= now) return { label: 'In Progress', color: 'bg-indigo-50 text-indigo-600' };
+    return { label: 'Completed', color: 'bg-gray-100 text-gray-500' };
+  };
+
+  // Set initial view based on role
+  useEffect(() => {
+    if (user?.role === 'manager' || user?.role === 'admin') {
+      setView('team');
+    }
+  }, [user?.role]);
 
   const handleShiftClick = (shiftId: string) => {
     const shiftNotifications = notifications.filter(n =>
@@ -261,8 +305,8 @@ export default function MyShiftsPage() {
                           </div>
                         </div>
                       </div>
-                      <span className={`px-3 py-1 rounded-full text-xs font-bold ${new Date(shift.startTime) > new Date() ? 'bg-green-50 text-green-600' : 'bg-gray-100 text-gray-500'}`}>
-                        {new Date(shift.startTime) > new Date() ? 'Upcoming' : 'Completed'}
+                      <span className={`px-3 py-1 rounded-full text-xs font-bold ${getShiftStatus(shift).color}`}>
+                        {getShiftStatus(shift).label}
                       </span>
                     </div>
 
@@ -317,7 +361,7 @@ export default function MyShiftsPage() {
         isOpen={showShiftModal}
         onClose={() => setShowShiftModal(false)}
         onSuccess={() => {
-          setLoading(true);
+          fetchShifts();
         }}
       />
     </DashboardLayout>

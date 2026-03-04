@@ -4,7 +4,7 @@ import connectToDatabase from "@/lib/mongodb";
 import Location from "@/models/Location";
 import ShiftSchedule from "@/models/ShiftSchedule";
 import Staff from "@/models/Staff";
-import mongoose, { Types } from "mongoose";
+import mongoose from "mongoose";
 import { NextRequest, NextResponse } from "next/server";
 
 // Helper function to get staff record for user
@@ -38,38 +38,30 @@ export async function GET(request: NextRequest) {
 
     const skip = (page - 1) * limit;
 
-    // Build filter
-    const filter: Record<string, unknown> = {};
+    // Build query conditions
+    const conditions: Record<string, unknown>[] = [];
 
-    // If user is manager, only show shifts for their managed locations
-    if (user.role === "manager") {
-      // Get all locations managed by this manager
-      const managedLocations = await Location.find({ manager: user._id });
-      const managedLocationIds = managedLocations.map(
-        (loc: { _id: Types.ObjectId }) => loc._id,
-      );
-
-      if (managedLocationIds.length > 0) {
-        filter.location = { $in: managedLocationIds };
-      } else {
-        // If manager has no managed locations, return empty result
-        filter.location = null;
-      }
-    }
-
+    // All authenticated users can see all shifts. No role-based filtering here.
+    
+    // 2. Additional filters from query params
     if (location) {
-      filter.location = location;
+      conditions.push({ location });
     }
 
     if (activeOnly) {
-      filter.isActive = true;
+      conditions.push({ isActive: true });
     }
 
-    // Don't show expired schedules
-    filter.$or = [
-      { endDate: { $exists: false } },
-      { endDate: { $gte: new Date() } },
-    ];
+    // 3. Expiry check (optional, but usually desired for "all shifts" view)
+    conditions.push({
+      $or: [
+        { endDate: { $exists: false } },
+        { endDate: { $gte: new Date() } },
+        { workDays: { $exists: false } }
+      ]
+    });
+
+    const filter = conditions.length > 0 ? { $and: conditions } : {};
 
     const shiftSchedules = await ShiftSchedule.find(filter)
       .populate("location", "address city timezone")

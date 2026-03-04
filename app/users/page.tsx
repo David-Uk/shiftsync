@@ -448,7 +448,7 @@ export default function UsersPage() {
 
         {/* Edit User Modal */}
         {showEditModal && selectedUser && (
-          <div className="fixed inset-0 bg-gray-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4 transition-opacity duration-300">
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-lg z-50 flex items-center justify-center p-4 transition-all duration-500">
             <div className="bg-white/95 backdrop-blur-md rounded-2xl shadow-2xl border border-white/20 max-w-lg w-full max-h-[85vh] overflow-y-auto overflow-x-hidden transform transition-all translate-y-8">
               <div className="p-5">
                 <div className="flex items-center justify-between mb-4">

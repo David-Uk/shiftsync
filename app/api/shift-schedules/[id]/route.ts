@@ -2,7 +2,6 @@ import { getAuthenticatedUser } from "@/lib/auth";
 import connectToDatabase from "@/lib/mongodb";
 import NotificationService from "@/lib/notificationService";
 import ShiftSchedule from "@/models/ShiftSchedule";
-import Staff from "@/models/Staff";
 import mongoose from "mongoose";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -33,7 +32,7 @@ export async function GET(
     }
 
     const shiftSchedule = await ShiftSchedule.findById(id)
-      .populate("location", "address city timezone")
+      .populate("location", "address city timezone manager")
       .populate("manager", "firstName lastName email")
       .populate("assignedStaff", "designation user");
 
@@ -44,32 +43,8 @@ export async function GET(
       );
     }
 
-    // Check permissions
-    if (
-      user.role === "manager" &&
-      shiftSchedule.manager._id.toString() !== user._id.toString()
-    ) {
-      return NextResponse.json(
-        { success: false, error: "Access denied" },
-        { status: 403 },
-      );
-    }
-
-    // If user is staff, check if they're assigned to this shift
-    if (user.role === "staff") {
-      const staff = await Staff.findOne({ user: user._id });
-      if (
-        !staff ||
-        !shiftSchedule.assignedStaff.some(
-          (s: mongoose.Types.ObjectId) => s.toString() === staff._id.toString(),
-        )
-      ) {
-        return NextResponse.json(
-          { success: false, error: "Access denied" },
-          { status: 403 },
-        );
-      }
-    }
+    // All authenticated users can view shift details. No permission checks needed for viewing.
+    
 
     // Convert to local timezone if requested
     const { searchParams } = new URL(request.url);
@@ -123,13 +98,12 @@ export async function PUT(
       );
     }
 
-    // Check permissions
-    if (
-      user.role === "manager" &&
-      shiftSchedule.manager.toString() !== user._id.toString()
-    ) {
+    // Check permissions: Only admin and the shift creator can modify
+    const isCreator = shiftSchedule.manager.toString() === user._id.toString();
+
+    if (user.role !== "admin" && !isCreator) {
       return NextResponse.json(
-        { success: false, error: "Access denied" },
+        { success: false, error: "Access denied. Only admin or the shift creator can modify this shift." },
         { status: 403 },
       );
     }
@@ -308,13 +282,12 @@ export async function DELETE(
       );
     }
 
-    // Check permissions
-    if (
-      user.role === "manager" &&
-      shiftSchedule.manager.toString() !== user._id.toString()
-    ) {
+    // Check permissions: Only admin and the shift creator can delete
+    const isCreator = shiftSchedule.manager.toString() === user._id.toString();
+
+    if (user.role !== "admin" && !isCreator) {
       return NextResponse.json(
-        { success: false, error: "Access denied" },
+        { success: false, error: "Access denied. Only admin or the shift creator can delete this shift." },
         { status: 403 },
       );
     }

@@ -2,6 +2,7 @@ import { verifyAuth } from "@/lib/auth";
 import connectToDatabase from "@/lib/mongodb";
 import { createNotificationForEvent } from "@/lib/notificationMiddleware";
 import Schedule from "@/models/Schedule";
+import Location from "@/models/Location";
 import Staff from "@/models/Staff";
 import User from "@/models/User";
 import mongoose from "mongoose";
@@ -60,14 +61,28 @@ export async function GET(request: NextRequest) {
       // Staff can only see their own schedules
       const staff = await getUserStaffRecord(user._id.toString());
       filter.staff = staff._id;
-    } else if (user.role === "manager" || user.role === "admin") {
-      // Managers and admins can see all schedules, or specific staff if staffId is provided
+    } else if (user.role === "manager") {
+      // Managers can only see schedules for staff at locations they manage
+      const managedLocations = await Location.find({ manager: user._id });
+      const managedLocationIds = managedLocations.map(loc => loc._id);
+      
+      filter.location = { $in: managedLocationIds };
+
       if (staffId) {
         const staff = await Staff.findOne({ user: staffId });
         if (staff) {
           filter.staff = staff._id;
         } else {
-          // If no staff record found for this user ID, ensure no results are returned
+          filter.staff = new mongoose.Types.ObjectId();
+        }
+      }
+    } else if (user.role === "admin") {
+      // Admins can see all schedules, or specific staff if staffId is provided
+      if (staffId) {
+        const staff = await Staff.findOne({ user: staffId });
+        if (staff) {
+          filter.staff = staff._id;
+        } else {
           filter.staff = new mongoose.Types.ObjectId();
         }
       }

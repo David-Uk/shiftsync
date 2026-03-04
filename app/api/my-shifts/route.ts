@@ -1,42 +1,8 @@
+import { getAuthenticatedUser } from "@/lib/auth";
 import connectToDatabase from "@/lib/mongodb";
 import ShiftSchedule from "@/models/ShiftSchedule";
 import Staff from "@/models/Staff";
-import User from "@/models/User";
-import jwt from "jsonwebtoken";
 import { NextRequest, NextResponse } from "next/server";
-
-// Helper function to verify JWT token and get user
-async function getAuthenticatedUser(request: NextRequest) {
-  try {
-    const authHeader = request.headers.get("authorization");
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      return null;
-    }
-
-    const token = authHeader.substring(7);
-    const jwt_secret = process.env.JWT_SECRET || "secret";
-    const decoded = jwt.verify(token, jwt_secret) as {
-      id: string;
-      role: string;
-    };
-
-    await connectToDatabase();
-    const user = await User.findById(decoded.id);
-
-    if (
-      !user ||
-      (user.role !== "admin" &&
-        user.role !== "manager" &&
-        user.role !== "staff")
-    ) {
-      return null;
-    }
-
-    return user;
-  } catch {
-    return null;
-  }
-}
 
 // GET assigned shift schedules for staff
 export async function GET(request: NextRequest) {
@@ -61,13 +27,16 @@ export async function GET(request: NextRequest) {
 
     const skip = (page - 1) * limit;
 
-    // Get staff record for this user
-    const staff = await Staff.findOne({ user: user._id });
+    // Get staff record for this user, auto-create if missing
+    let staff = await Staff.findOne({ user: user._id });
     if (!staff) {
-      return NextResponse.json(
-        { success: false, error: "Staff record not found for this user" },
-        { status: 404 },
-      );
+      // Auto-create staff record if it doesn't exist
+      staff = new Staff({
+        user: user._id,
+        designation: user.designation || (user.role === 'manager' ? 'Manager' : 'Staff Member'),
+        status: 'active'
+      });
+      await staff.save();
     }
 
     // Build filter for assigned shifts

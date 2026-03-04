@@ -6,7 +6,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/contexts/ToastContext';
 import { Calendar, Clock, Edit, Globe, Plus, Trash2, Users } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 interface Schedule {
   _id: string;
@@ -59,7 +59,7 @@ export default function SchedulePage() {
     timezone: 'UTC',
     notes: ''
   });
-  const [staff, setStaff] = useState([]);
+  const [staff, setStaff] = useState<{ _id: string; firstName: string; lastName: string }[]>([]);
 
   // Helper function to sort and filter schedules
   const getSortedAndFilteredSchedules = () => {
@@ -144,63 +144,61 @@ export default function SchedulePage() {
     }
   };
 
+  const fetchSchedules = useCallback(async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const params = new URLSearchParams();
+
+      if (user?.role === 'staff') {
+        params.append('staffId', user._id || user.id);
+      }
+
+      const response = await fetch(`/api/schedules?${params}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setSchedules(data.schedules || []);
+      } else {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.message || 'Failed to fetch schedules');
+      }
+    } catch (error) {
+      console.error('Error fetching schedules:', error);
+    } finally {
+      setLoading(false);
+    }
+  }, [user?._id, user?.id, user?.role]);
+
+  const fetchStaff = useCallback(async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch('/api/users?role=staff&limit=100', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setStaff(data.users || []);
+      }
+    } catch (error) {
+      console.error('Error fetching staff:', error);
+    }
+  }, []);
+
   useEffect(() => {
     if (!isAuthenticated) {
       router.push('/auth/login');
       return;
     }
 
-    const fetchSchedules = async () => {
-      try {
-        const token = localStorage.getItem('token');
-        const params = new URLSearchParams();
-
-        // Add role-based filtering
-        if (user?.role === 'staff') {
-          params.append('staffId', user._id || user.id);
-        }
-        // Managers and admins see all schedules
-
-        const response = await fetch(`/api/schedules?${params}`, {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          },
-        });
-
-        if (response.ok) {
-          const data = await response.json();
-          setSchedules(data.schedules || []);
-        } else {
-          const errorData = await response.json().catch(() => ({}));
-          throw new Error(errorData.message || 'Failed to fetch schedules');
-        }
-      } catch (error) {
-        console.error('Error fetching schedules:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    const fetchStaff = async () => {
-      try {
-        const token = localStorage.getItem('token');
-        const response = await fetch('/api/users?role=staff&limit=100', {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-
-        if (response.ok) {
-          const data = await response.json();
-          setStaff(data.users || []);
-        }
-      } catch (error) {
-        console.error('Error fetching staff:', error);
-      }
-    };
-
     fetchSchedules();
     fetchStaff();
-  }, [isAuthenticated, router, user?.role, user?._id, user?.id]);
+  }, [isAuthenticated, router, fetchSchedules, fetchStaff]);
 
   // Real-time time gap validation
   useEffect(() => {
@@ -578,7 +576,7 @@ export default function SchedulePage() {
 
         {/* Create Form Modal */}
         {showCreateForm && (
-          <div className="fixed inset-0 bg-gray-950/40 backdrop-blur-sm z-50 flex items-center justify-center p-4 transition-all duration-300">
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-lg z-50 flex items-center justify-center p-4 transition-all duration-500">
             <div className="bg-white rounded-[2rem] shadow-2xl border border-gray-100 max-w-md w-full max-h-[90vh] overflow-hidden flex flex-col transform transition-all animate-in fade-in zoom-in duration-300">
               <div className="flex-1 overflow-y-auto p-8 scrollbar-hide">
                 <div className="flex items-center justify-between mb-8">
@@ -986,15 +984,15 @@ export default function SchedulePage() {
                         {(user?.role === 'admin' || user?.role === 'manager') && schedule.staff && (
                           <div className="mb-3 pb-3 border-b border-gray-200">
                             <div className="text-sm font-bold text-gray-900">
-                              {typeof schedule.staff.user === 'object' && 'firstName' in schedule.staff.user
-                                ? `${(schedule.staff.user as any).firstName} ${(schedule.staff.user as any).lastName}`
+                              {typeof schedule.staff.user === 'object' && 'firstName' in (schedule.staff.user as object)
+                                ? `${(schedule.staff.user as { firstName: string; lastName: string }).firstName} ${(schedule.staff.user as { firstName: string; lastName: string }).lastName}`
                                 : 'Staff Member'}
                             </div>
                             {schedule.staff.designation && (
                               <div className="text-xs text-gray-600 font-medium">{schedule.staff.designation}</div>
                             )}
                             {typeof schedule.staff.user === 'object' && 'role' in schedule.staff.user && (
-                              <div className="text-xs text-gray-500 capitalize">Role: {(schedule.staff.user as any).role}</div>
+                              <div className="text-xs text-gray-500 capitalize">Role: {(schedule.staff.user as { role: string }).role}</div>
                             )}
                           </div>
                         )}
@@ -1080,7 +1078,7 @@ export default function SchedulePage() {
           onClose={() => setShowShiftModal(false)}
           onSuccess={() => {
             // Refresh schedules when a new shift is created
-            setLoading(true);
+            fetchSchedules();
           }}
         />
       </div>

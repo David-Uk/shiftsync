@@ -104,7 +104,7 @@ export default function ShiftScheduleModal({
                     timezone: locationData[0].timezone || 'UTC'
                 }));
             }
-        } catch (err) {
+        } catch {
             setError('Failed to load locations');
         } finally {
             setLocationsLoading(false);
@@ -297,10 +297,10 @@ export default function ShiftScheduleModal({
     if (!isOpen) return null;
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/50 backdrop-blur-sm animate-in fade-in duration-300">
-            <div className="bg-white rounded-3xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-300 border border-gray-100">
+        <div className="fixed inset-0 z-9999 flex items-start justify-center px-4 sm:px-6 lg:px-8 bg-slate-900/90 backdrop-blur-lg animate-in fade-in duration-500 lg:pl-64 lg:items-center lg:justify-center lg:pt-8">
+            <div className="bg-white rounded-[2.5rem] shadow-2xl w-full max-w-2xl lg:max-w-4xl max-h-[90vh] flex flex-col overflow-hidden animate-in zoom-in-95 slide-in-from-bottom-4 duration-500 border border-white/20 relative transform-gpu">
                 {/* Header */}
-                <div className="p-6 border-b border-gray-50 flex items-center justify-between bg-white sticky top-0 z-10">
+                <div className="p-4 border-b border-gray-50 flex items-center justify-between bg-white sticky top-0 z-10">
                     <div className="flex items-center space-x-4">
                         <div className="bg-indigo-50 p-3 rounded-2xl">
                             <Clock className="h-6 w-6 text-indigo-600" />
@@ -324,17 +324,17 @@ export default function ShiftScheduleModal({
                 </div>
 
                 {/* Body */}
-                <div className="flex-1 overflow-y-auto p-8 custom-scrollbar bg-[#fcfcfd]">
+                <div className="flex-1 overflow-y-auto p-4 lg:p-6 custom-scrollbar bg-[#fcfcfd]">
                     {error && (
-                        <div className="mb-6 p-4 bg-red-50 border border-red-100 rounded-2xl flex items-center space-x-3 text-red-600 animate-in slide-in-from-top-2 duration-300">
+                        <div className="mb-4 p-4 bg-red-50 border border-red-100 rounded-2xl flex items-center space-x-3 text-red-600 animate-in slide-in-from-top-2 duration-300">
                             <AlertCircle className="h-5 w-5 flex-shrink-0" />
                             <p className="text-sm font-semibold">{error}</p>
                         </div>
                     )}
 
                     {currentStep === 1 && (
-                        <div className="space-y-8 animate-in slide-in-from-right-4 duration-300">
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                        <div className="space-y-4 animate-in slide-in-from-right-4 duration-300">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <div className="space-y-2 group">
                                     <label className="block text-sm font-bold text-gray-700 ml-1">Location</label>
                                     <div className="relative">
@@ -423,18 +423,18 @@ export default function ShiftScheduleModal({
                                 {slots.length === 0 ? (
                                     <div className="text-center py-16 bg-white border-2 border-dashed border-gray-100 rounded-[2rem] animate-pulse">
                                         <Clock className="mx-auto h-12 w-12 text-gray-200 mb-4" />
-                                        <p className="text-gray-400 font-medium">No slots added yet. Start by clicking "Add New Slot".</p>
+                                        <p className="text-gray-400 font-medium">No slots added yet. Start by clicking &quot;Add New Slot&quot;.</p>
                                     </div>
                                 ) : (
                                     slots.map((slot) => (
                                         <div key={slot.id} className="p-6 bg-white border border-gray-100 rounded-[2rem] shadow-sm hover:shadow-md transition-all duration-300 group relative">
-                                            <button 
+                                            <button
                                                 onClick={() => handleRemoveSlot(slot.id)}
                                                 className="absolute top-4 right-4 p-2 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-full transition-all duration-200"
                                             >
                                                 <Trash2 className="h-5 w-5" />
                                             </button>
-                                            
+
                                             <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
                                                 <div className="space-y-2">
                                                     <label className="text-xs font-bold text-gray-400 uppercase tracking-widest ml-1">Designation</label>
@@ -491,7 +491,7 @@ export default function ShiftScheduleModal({
                                                 <div className="space-y-2">
                                                     <label className="text-xs font-bold text-gray-400 uppercase tracking-widest ml-1">Headcount</label>
                                                     <div className="flex items-center space-x-3 bg-gray-50 rounded-2xl p-1 px-2 border border-transparent">
-                                                        <button 
+                                                        <button
                                                             onClick={() => updateSlot(slot.id, { headcount: Math.max(1, slot.headcount - 1) })}
                                                             className="p-2 text-indigo-600 hover:bg-white rounded-xl transition-all duration-200 shadow-sm disabled:opacity-30"
                                                             disabled={slot.headcount <= 1}
@@ -504,7 +504,7 @@ export default function ShiftScheduleModal({
                                                             onChange={(e) => updateSlot(slot.id, { headcount: parseInt(e.target.value) || 1 })}
                                                             className="w-12 text-center bg-transparent font-bold text-gray-700 border-none outline-none"
                                                         />
-                                                        <button 
+                                                        <button
                                                             onClick={() => updateSlot(slot.id, { headcount: slot.headcount + 1 })}
                                                             className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all duration-200"
                                                         >
@@ -524,7 +524,7 @@ export default function ShiftScheduleModal({
                                                             className={`px-4 py-2 rounded-xl text-sm font-bold transition-all duration-300 ${slot.workDays.includes(day)
                                                                 ? 'bg-indigo-600 text-white shadow-md shadow-indigo-100'
                                                                 : 'bg-gray-50 text-gray-400 hover:bg-gray-100'
-                                                            }`}
+                                                                }`}
                                                         >
                                                             {day.substring(0, 3)}
                                                         </button>
@@ -550,7 +550,7 @@ export default function ShiftScheduleModal({
                                             className={`px-4 py-2 rounded-xl text-sm font-bold transition-all duration-300 border-2 ${activeSlotId === s.id
                                                 ? 'bg-indigo-600 text-white border-indigo-600 shadow-lg shadow-indigo-100'
                                                 : 'bg-white text-gray-500 border-gray-100 hover:border-indigo-100'
-                                            }`}
+                                                }`}
                                         >
                                             {s.designation}
                                         </button>
@@ -590,19 +590,17 @@ export default function ShiftScheduleModal({
                                                 </div>
                                             ) : (
                                                 activeSlot.availableStaff.map(staff => (
-                                                    <div 
+                                                    <div
                                                         key={staff._id}
                                                         onClick={() => handleStaffToggle(activeSlot.id, staff._id)}
-                                                        className={`p-4 border rounded-[2rem] cursor-pointer transition-all duration-300 flex items-center justify-between group ${
-                                                            activeSlot.assignedStaff.includes(staff._id)
+                                                        className={`p-4 border rounded-[2rem] cursor-pointer transition-all duration-300 flex items-center justify-between group ${activeSlot.assignedStaff.includes(staff._id)
                                                             ? 'border-indigo-600 bg-indigo-50 shadow-md shadow-indigo-100/50'
                                                             : 'border-gray-100 bg-white hover:border-indigo-200'
-                                                        }`}
+                                                            }`}
                                                     >
                                                         <div className="flex items-center space-x-4">
-                                                            <div className={`w-12 h-12 rounded-2xl flex items-center justify-center font-bold text-lg transition-colors ${
-                                                                activeSlot.assignedStaff.includes(staff._id) ? 'bg-indigo-600 text-white' : 'bg-gray-50 text-gray-400 group-hover:bg-indigo-50 group-hover:text-indigo-600'
-                                                            }`}>
+                                                            <div className={`w-12 h-12 rounded-2xl flex items-center justify-center font-bold text-lg transition-colors ${activeSlot.assignedStaff.includes(staff._id) ? 'bg-indigo-600 text-white' : 'bg-gray-50 text-gray-400 group-hover:bg-indigo-50 group-hover:text-indigo-600'
+                                                                }`}>
                                                                 {staff.user.firstName[0]}{staff.user.lastName[0]}
                                                             </div>
                                                             <div>
@@ -610,9 +608,8 @@ export default function ShiftScheduleModal({
                                                                 <p className="text-xs text-gray-400 font-bold uppercase tracking-wider">{staff.designation}</p>
                                                             </div>
                                                         </div>
-                                                        <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all duration-300 ${
-                                                            activeSlot.assignedStaff.includes(staff._id) ? 'bg-indigo-600 border-indigo-600' : 'border-gray-200'
-                                                        }`}>
+                                                        <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all duration-300 ${activeSlot.assignedStaff.includes(staff._id) ? 'bg-indigo-600 border-indigo-600' : 'border-gray-200'
+                                                            }`}>
                                                             {activeSlot.assignedStaff.includes(staff._id) && <Check className="h-3 w-3 text-white" />}
                                                         </div>
                                                     </div>
@@ -649,12 +646,12 @@ export default function ShiftScheduleModal({
                 </div>
 
                 {/* Footer */}
-                <div className="p-8 border-t border-gray-50 bg-white sticky bottom-0 z-10">
+                <div className="p-4 lg:p-6 border-t border-gray-50 bg-white sticky bottom-0 z-10">
                     <div className="flex items-center justify-between">
                         <button
                             disabled={currentStep === 1 || loading}
                             onClick={() => setCurrentStep(prev => prev - 1)}
-                            className="px-8 py-3.5 border-2 border-gray-100 text-gray-600 rounded-2xl hover:bg-gray-50 disabled:opacity-30 disabled:hover:bg-transparent transition-all duration-300 font-bold text-sm"
+                            className="px-6 py-2.5 border-2 border-gray-100 text-gray-600 rounded-2xl hover:bg-gray-50 disabled:opacity-30 disabled:hover:bg-transparent transition-all duration-300 font-bold text-sm"
                         >
                             Back
                         </button>
@@ -663,7 +660,7 @@ export default function ShiftScheduleModal({
                             <button
                                 disabled={loading}
                                 onClick={handleNextStep}
-                                className="px-10 py-3.5 bg-indigo-600 text-white rounded-2xl hover:bg-indigo-700 shadow-xl shadow-indigo-100 transition-all duration-300 transform active:scale-95 disabled:opacity-50 font-bold flex items-center"
+                                className="px-8 py-2.5 bg-indigo-600 text-white rounded-2xl hover:bg-indigo-700 shadow-xl shadow-indigo-100 transition-all duration-300 transform active:scale-95 disabled:opacity-50 font-bold flex items-center"
                             >
                                 {loading ? (
                                     <>
